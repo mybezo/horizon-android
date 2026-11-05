@@ -320,13 +320,13 @@ impl Settings {
         if !self.sensitivity.is_finite() {
             self.sensitivity = 1.0;
         }
-        self.sensitivity = self.sensitivity.clamp(0.1, 3.0);
+        self.sensitivity = self.sensitivity.clamp(0.01, 10.0);
         for value in [
             &mut self.sensitivity_horizontal,
             &mut self.sensitivity_vertical,
         ] {
             *value = if value.is_finite() {
-                value.clamp(0.1, 3.0)
+                value.clamp(0.01, 10.0)
             } else {
                 1.0
             };

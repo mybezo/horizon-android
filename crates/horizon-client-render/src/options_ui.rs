@@ -359,9 +359,9 @@ impl Opt {
             Opt::TouchVerticalMargin => unit(s.touch.vertical_margin, 0.0, 0.12),
             Opt::DebugGuiScale => unit(s.file.int("debugGuiScale").max(0) as f32, 0.0, 6.0),
             Opt::AndroidGyroSensitivity => unit(s.touch.gyro_sensitivity, 0.1, 3.0),
-            Opt::TouchSensitivity => unit(s.touch.sensitivity, 0.1, 3.0),
-            Opt::TouchSensitivityHorizontal => unit(s.touch.sensitivity_horizontal, 0.1, 3.0),
-            Opt::TouchSensitivityVertical => unit(s.touch.sensitivity_vertical, 0.1, 3.0),
+            Opt::TouchSensitivity => unit(s.touch.sensitivity, 0.01, 10.0),
+            Opt::TouchSensitivityHorizontal => unit(s.touch.sensitivity_horizontal, 0.01, 10.0),
+            Opt::TouchSensitivityVertical => unit(s.touch.sensitivity_vertical, 0.01, 10.0),
             Opt::TouchMouseSensitivity => unit(s.touch.virtual_mouse_sensitivity, 0.01, 10.0),
             Opt::TouchButtonScale => unit(s.touch.button_scale, 0.5, 2.0),
             Opt::Fov => unit(s.fov, 30.0, 110.0),
@@ -459,7 +459,10 @@ impl Opt {
     pub fn slider_steps(self) -> Option<u32> {
         match self {
             Opt::Fov => Some(80),
-            Opt::TouchMouseSensitivity => Some(999),
+            Opt::TouchSensitivity
+            | Opt::TouchSensitivityHorizontal
+            | Opt::TouchSensitivityVertical
+            | Opt::TouchMouseSensitivity => Some(999),
             Opt::RenderDistance => Some((crate::options_file::MAX_RENDER_DISTANCE - 2) as u32),
             Opt::SimulationDistance => Some(27),
             Opt::MaxFps => Some(25),
@@ -998,9 +1001,15 @@ impl Opt {
                 crate::options_file::V::Int(step(0.0, 6.0) as i32),
             ),
             Opt::AndroidGyroSensitivity => s.touch.gyro_sensitivity = 0.1 + v * 2.9,
-            Opt::TouchSensitivity => s.touch.sensitivity = 0.1 + v * 2.9,
-            Opt::TouchSensitivityHorizontal => s.touch.sensitivity_horizontal = 0.1 + v * 2.9,
-            Opt::TouchSensitivityVertical => s.touch.sensitivity_vertical = 0.1 + v * 2.9,
+            Opt::TouchSensitivity => {
+                s.touch.sensitivity = (1.0 + v * 999.0).round() / 100.0;
+            }
+            Opt::TouchSensitivityHorizontal => {
+                s.touch.sensitivity_horizontal = (1.0 + v * 999.0).round() / 100.0;
+            }
+            Opt::TouchSensitivityVertical => {
+                s.touch.sensitivity_vertical = (1.0 + v * 999.0).round() / 100.0;
+            }
             Opt::TouchMouseSensitivity => {
                 s.touch.virtual_mouse_sensitivity = (1.0 + v * 999.0).round() / 100.0;
             }
@@ -7349,7 +7358,7 @@ mod tests {
         Opt::DebugGuiScale.set_slider(&mut settings, 0.5);
         assert_eq!(settings.file.int("debugGuiScale"), 3);
         Opt::TouchSensitivity.set_slider(&mut settings, 0.0);
-        assert!((settings.touch.sensitivity - 0.1).abs() < 0.0001);
+        assert!((settings.touch.sensitivity - 0.01).abs() < 0.0001);
         let mut ui = OptionsUi::default();
         ui.push(Page::Touch);
         let (widgets, _, _, _) = ui.layout(&settings, 427.0, 240.0);
@@ -7360,6 +7369,32 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn touch_camera_and_pointer_sliders_cover_every_integer_percent() {
+        let mut settings = Settings::default();
+        for opt in [
+            Opt::TouchSensitivity,
+            Opt::TouchSensitivityHorizontal,
+            Opt::TouchSensitivityVertical,
+            Opt::TouchMouseSensitivity,
+        ] {
+            assert_eq!(opt.slider_steps(), Some(999));
+            for percent in 1..=1000 {
+                let position = (percent - 1) as f32 / 999.0;
+                opt.set_slider(&mut settings, position);
+                settings.touch.sanitize();
+                let value = match opt {
+                    Opt::TouchSensitivity => settings.touch.sensitivity,
+                    Opt::TouchSensitivityHorizontal => settings.touch.sensitivity_horizontal,
+                    Opt::TouchSensitivityVertical => settings.touch.sensitivity_vertical,
+                    _ => settings.touch.virtual_mouse_sensitivity,
+                };
+                assert!((value * 100.0 - percent as f32).abs() < 0.001);
+                assert!((opt.slider_position(&settings).unwrap() - position).abs() < 0.0001);
+            }
+        }
     }
 
     #[test]

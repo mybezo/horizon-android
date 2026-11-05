@@ -78,6 +78,13 @@ impl Game {
  for (value,want) in [(-1.0,0.01),(20.0,10.0),(f32::NAN,1.0)] {let mut s=touch_settings::Settings::default();s.virtual_mouse_sensitivity=value;s.sanitize();assert_eq!(s.virtual_mouse_sensitivity,want);}
 }
 '''
+    touch = (ROOT / 'crates/horizon-client-render/src/touch.rs').read_text()
+    source += '\nmod camera {use super::touch_settings::Settings;\n'
+    source += block(touch, 'pub fn camera_delta(') + '\n'
+    for test in ['camera_sensitivity_uses_one_to_one_thousand_percent_after_reload',
+                 'camera_calibration_uses_physical_distance_on_both_axes']:
+        source += '#[test]\n' + block(touch, '    fn ' + test + '(') + '\n'
+    source += '}\n'
     (work / 'src/lib.rs').write_text(source)
     env = dict(os.environ)
     env.setdefault('CARGO_BUILD_JOBS', '2')

@@ -104,3 +104,23 @@ regressions, seven controller/storage tests (including the supplied layout),
 and 21 Android Python tests passed. Android ARM64 cargo check, rustfmt,
 actionlint and the public source boundary check passed. This is compiler and
 backend validation; an APK was not assembled or tested on a phone here.
+
+## Camera sensitivity correction
+
+The earlier 1–1000% change affected only the virtual menu pointer. Touch camera
+sensitivity, horizontal sensitivity and vertical sensitivity now also span
+1–1000% in one-percent steps. Their profile sanitization preserves the full
+range. The base speed remains unchanged at 100%; the global camera multiplier
+and its per-axis multipliers multiply together. For faster turning, increase
+Touch sensitivity while keeping Horizontal/Vertical sensitivity at 100% first.
+
+The camera regression uses the actual camera_delta function and serialized
+settings: a 100-pixel drag on a 2400-pixel surface turns 7.5 degrees at 100%
+and 75 degrees at 1000%. The slider regression covers all 1000 integer
+percentages for all four sliders. The original launcher UI is unchanged.
+
+This correction passed six executable input/settings/camera backend tests and
+`cargo +1.95.0 check -p horizon-client-render --lib --tests` on the host, plus
+rustfmt and the public source check. The new renderer slider unit test compiled;
+it was not executed as part of this check. No new APK or phone interaction was
+tested here.

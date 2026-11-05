@@ -1315,6 +1315,29 @@ mod tests {
     }
 
     #[test]
+    fn camera_sensitivity_uses_one_to_one_thousand_percent_after_reload() {
+        for (percent, expected) in [(1.0, 0.075), (100.0, 7.5), (300.0, 22.5), (1000.0, 75.0)] {
+            let mut settings = Settings::default();
+            settings.sensitivity = percent / 100.0;
+            let saved = serde_json::to_vec(&settings).unwrap();
+            let mut loaded: Settings = serde_json::from_slice(&saved).unwrap();
+            loaded.sanitize();
+            let turn = camera_delta([100.0 / 2400.0, 100.0 / 1080.0], 2400, 1080, &loaded);
+            assert!((turn[0] - expected).abs() < 0.0001);
+            assert!((turn[1] - expected).abs() < 0.0001);
+        }
+        for percent in [0.01, 10.0] {
+            let mut settings = Settings::default();
+            settings.sensitivity_horizontal = percent;
+            settings.sensitivity_vertical = percent;
+            settings.sanitize();
+            let turn = camera_delta([100.0 / 2400.0, 100.0 / 1080.0], 2400, 1080, &settings);
+            assert!((turn[0] - 7.5 * percent).abs() < 0.0001);
+            assert!((turn[1] - 7.5 * percent).abs() < 0.0001);
+        }
+    }
+
+    #[test]
     fn camera_calibration_uses_physical_distance_on_both_axes() {
         let mut settings = Settings::default();
         for (w, h) in [(2400, 1080), (1080, 2400)] {
