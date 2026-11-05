@@ -156,10 +156,14 @@ impl TouchUi {
         keys.dedup();
         keys
     }
-    pub fn press_mouse(&mut self, id: u64, right: bool) -> bool {
+    pub fn suppress_relative_click(&mut self) {
         if let Some(touch) = &mut self.relative {
             touch.dragged = true;
         }
+        self.relative_click = None;
+    }
+    pub fn press_mouse(&mut self, id: u64, right: bool) -> bool {
+        self.suppress_relative_click();
         let first = !self.mouse_buttons.values().any(|v| *v == right);
         self.mouse_buttons.insert(id, right);
         first
@@ -703,5 +707,32 @@ mod tests {
     #[test]
     fn a_release_without_ownership_stays_with_the_game() {
         assert_eq!(aux_mouse_phase(false, false, true), None);
+    }
+}
+
+#[cfg(test)]
+mod layout_pointer_tests {
+    use super::*;
+    #[test]
+    fn layout_mouse_hold_keeps_relative_motion_without_an_extra_click() {
+        let mut ui = TouchUi::default();
+        let size = [400.0, 250.0];
+        let cursor = [100.0, 80.0];
+        ui.relative_touch(
+            1,
+            [10.0, 10.0],
+            TouchPhase::Started,
+            cursor,
+            size,
+            1.0,
+            true,
+        );
+        ui.suppress_relative_click();
+        ui.relative.as_mut().unwrap().since = Instant::now() - Duration::from_secs(1);
+        assert_eq!(ui.relative_click(true), None);
+        let moved = ui.relative_touch(1, [30.0, 25.0], TouchPhase::Moved, cursor, size, 1.0, true);
+        assert_eq!(moved, [120.0, 95.0]);
+        ui.relative_touch(1, [30.0, 25.0], TouchPhase::Ended, moved, size, 1.0, true);
+        assert_eq!(ui.relative_click(true), None);
     }
 }

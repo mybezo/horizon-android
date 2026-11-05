@@ -23,6 +23,8 @@ struct State {
     held_buttons: std::collections::HashSet<MouseButton>,
     opacity: f32,
     hidden: bool,
+    virtual_mouse: bool,
+    pointer_open: bool,
     size: Option<f32>,
     scrolling: Option<(f32, Instant)>,
 }
@@ -62,6 +64,8 @@ impl State {
             held_buttons: Default::default(),
             opacity,
             hidden,
+            virtual_mouse: display["virtual_mouse"].as_bool().unwrap_or(true),
+            pointer_open: false,
             size,
             scrolling: None,
         }
@@ -74,7 +78,7 @@ impl State {
             std::fs::write(
                 &partial,
                 serde_json::to_vec(
-                    &serde_json::json!({"opacity":self.opacity,"size":self.size,"hidden":self.hidden,"ball":[self.menu.ball.0,self.menu.ball.1]}),
+                    &serde_json::json!({"opacity":self.opacity,"size":self.size,"hidden":self.hidden,"virtual_mouse":self.virtual_mouse,"ball":[self.menu.ball.0,self.menu.ball.1]}),
                 )?,
             )?;
             std::fs::rename(partial, path)
@@ -132,6 +136,19 @@ pub(super) fn held_mouse(button: MouseButton) -> bool {
 pub(super) fn density(window: &Window) -> f32 {
     let [x, y] = winit::platform::android::native_input_scale();
     (window.scale_factor() * x.min(y)) as f32
+}
+fn pointer_blocked() -> bool {
+    with(|s| s.editor.is_some() || s.menu.open)
+}
+pub(super) fn virtual_mouse() -> bool {
+    with(|s| s.virtual_mouse)
+}
+fn enter_pointer(open: bool) -> bool {
+    with(|s| {
+        let entered = open && !s.pointer_open;
+        s.pointer_open = open;
+        entered
+    })
 }
 pub(super) fn editing() -> bool {
     with(|s| s.editor.is_some())
@@ -372,6 +389,12 @@ fn choice(choice: Choice) -> bool {
             open_editor();
             true
         }
+        Choice::VirtualMouse => {
+            with(|s| {
+                s.virtual_mouse = !s.virtual_mouse;
+            });
+            true
+        }
         Choice::ImportControls => {
             if let Err(e) =
                 crate::documents::begin_zalith(std::env::current_dir().unwrap_or_default())
@@ -427,6 +450,22 @@ fn choice(choice: Choice) -> bool {
     handled
 }
 impl Game<'_> {
+    pub(super) fn zalith_pointer(&mut self) {
+        self.pad.touch_ui.virtual_mouse = virtual_mouse();
+        if pointer_blocked() {
+            self.pad.touch_ui.cancel_relative();
+        }
+        let show = self.pad_in_menu()
+            && self.pad.touch_ui.virtual_mouse
+            && crate::touch_visible()
+            && !editing();
+        if enter_pointer(show)
+            && let Some(batch) = self.gui_scale()
+        {
+            self.cursor = (batch.width / 2.0, batch.height / 2.0);
+        }
+    }
+
     fn zalith_scroll(&mut self, events: &dyn super::event_loop::EventLoopCtl, lines: f32) {
         let id = self.window.as_ref().map_or(WindowId::dummy(), |w| w.id());
         self.handle_window_event(
@@ -448,6 +487,9 @@ impl Game<'_> {
                     if mouse_button(&name).is_some() =>
                 {
                     let button = mouse_button(&name).unwrap();
+                    if pressed {
+                        self.pad.touch_ui.suppress_relative_click();
+                    }
                     with(|s| {
                         if pressed {
                             s.held_buttons.insert(button);
@@ -524,6 +566,9 @@ impl Game<'_> {
                                         let _ = self.mapped_key(code, pressed, false);
                                     }
                                     Err(button) => {
+                                        if pressed {
+                                            self.pad.touch_ui.suppress_relative_click();
+                                        }
                                         let _ = self.android_custom_mouse(button, pressed);
                                     }
                                 }

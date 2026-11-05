@@ -14963,6 +14963,14 @@ impl Game<'_> {
                 &self.settings,
             );
         }
+        #[cfg(target_os = "android")]
+        if self.pad.touch_ui.virtual_mouse
+            && self.pad_in_menu()
+            && !zalith::editing()
+            && crate::touch_visible()
+        {
+            horizon_client::touch_ui::draw_pointer(&mut hud, &self.gui.atlas, self.cursor);
+        }
         self.flush_ime(&mut hud);
         let title = self.shows_panorama();
         let (yaw, pitch) = if title {
@@ -16143,6 +16151,11 @@ impl Game<'_> {
                 );
                 self.zalith_events(event_loop);
                 if taken {
+                    return;
+                }
+                self.zalith_pointer();
+                if self.pad.touch_ui.virtual_mouse && self.pad_in_menu() && !zalith::editing() {
+                    self.android_virtual_touch(touch, event_loop, id);
                     return;
                 }
             }

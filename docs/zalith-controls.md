@@ -13,6 +13,7 @@ primitives required by the controller shapes; existing UI calls are unchanged.
 
 - Play using the original launcher and choose the Touch input mode.
 - The floating H menu opens the controller editor and **Import Zalith JSON**.
+- In inventory, pause and other game menus, a virtual pointer appears automatically. Drag an empty area to move it; tap for left-click or hold still for right-click. **H → Toggle mouse pointer** switches between the pointer and direct touch. The preference is saved per profile.
 - The original **Touch Controls** settings entry opens the new layout editor,
   including from the loading/title screen's settings.
 - Import a controller JSON with Android's file picker. The original v12 JSON is
@@ -74,3 +75,12 @@ after the job and is not included in APK artifacts. This is a development-only
 identity. A configured dedicated secret gives stable identity beyond cache
 retention. Real JDK 17 generation, validation and reuse, five signing regression
 cases and both workflow templates were checked.
+
+## Virtual mouse follow-up
+
+The port now connects the existing engine relative mouse to unclaimed menu
+touches and renders its pointer independently of the hidden native auxiliary
+overlay. It starts at the menu center and is hidden during the layout editor
+and gameplay capture. Layout mouse-button holds suppress additional tap clicks.
+Four original/new pointer backend regression tests run through tools/test_android_pointer.py;
+actual phone interaction still needs verification.

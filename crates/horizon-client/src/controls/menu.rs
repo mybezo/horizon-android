@@ -28,6 +28,7 @@ pub struct Settings {
 pub enum Choice {
     EditControls,
     ImportControls,
+    VirtualMouse,
     Gestures,
     Gyroscope,
     Opacity,
@@ -169,6 +170,7 @@ impl Menu {
             let items = [
                 ("Edit controls".to_owned(), Choice::EditControls),
                 ("Import Zalith JSON".to_owned(), Choice::ImportControls),
+                ("Toggle mouse pointer".to_owned(), Choice::VirtualMouse),
                 (
                     format!("Gestures: {}", on(settings.gestures)),
                     Choice::Gestures,

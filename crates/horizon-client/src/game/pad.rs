@@ -194,6 +194,7 @@ impl Game<'_> {
                 super::zalith::release();
             }
             self.zalith_events(event_loop);
+            self.zalith_pointer();
         }
         #[cfg(target_os = "android")]
         if !matches!(self.screen, Screen::Playing | Screen::Options)

@@ -719,7 +719,9 @@ impl Game<'_> {
             [self.cursor.0, self.cursor.1],
             [b.width, b.height],
             self.settings.touch.virtual_mouse_sensitivity,
-            !self.pad.touch_ui.mouse_held(),
+            !self.pad.touch_ui.mouse_held()
+                && !self.android_custom_mouse_held(MouseButton::Left)
+                && !self.android_custom_mouse_held(MouseButton::Right),
         );
         self.handle_window_event(
             events,
