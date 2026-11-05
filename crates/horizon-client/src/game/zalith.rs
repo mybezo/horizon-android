@@ -111,10 +111,19 @@ impl State {
             .and_then(|m| m.modified())
             .ok();
         if stamp != self.stamp && self.editor.is_none() && self.contacts.is_empty() {
-            if let Ok(layout) = storage::load(&self.home) {
-                self.release();
-                self.controls = Controls::new(layout);
-                self.stamp = stamp;
+            // Advance the stamp even when the file is unreadable or invalid:
+            // otherwise a bad (or half-written) layout is re-read and re-parsed
+            // on the event thread every 250 ms, forever.
+            self.stamp = stamp;
+            match storage::load(&self.home) {
+                Ok(layout) => {
+                    self.release();
+                    self.controls = Controls::new(layout);
+                }
+                Err(error) if stamp.is_some() => {
+                    log::warn!("Controller layout not reloaded: {error}");
+                }
+                Err(_) => {}
             }
         }
     }
@@ -122,15 +131,33 @@ impl State {
 thread_local! { static STATE: RefCell<Option<State>> = const { RefCell::new(None) }; }
 fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with(|slot| {
-        let home = std::env::current_dir().unwrap_or_default();
         let mut slot = slot.borrow_mut();
-        if slot.as_ref().is_none_or(|s| s.home != home) {
-            *slot = Some(State::new(home));
-        }
-        let state = slot.as_mut().unwrap();
+        // The game folder is fixed for a session (`reset_session` runs when one
+        // starts), so it is read once instead of on every input/draw query.
+        let state =
+            slot.get_or_insert_with(|| State::new(std::env::current_dir().unwrap_or_default()));
         state.reload();
         f(state)
     })
+}
+/// Forget everything from the previous game session in this process: held
+/// keys, fingers whose release never arrived, an open menu or editor. Android
+/// keeps the process (and this thread's state) alive between sessions; stale
+/// fingers there swallowed every touch until the app was killed.
+pub(crate) fn reset_session() {
+    STATE.with(|slot| *slot.borrow_mut() = None);
+}
+/// Android took the window away: nothing stays pressed across it.
+pub(super) fn suspend() {
+    STATE.with(|slot| {
+        if let Some(state) = slot.borrow_mut().as_mut() {
+            state.release();
+            state.held_keys.clear();
+            state.held_buttons.clear();
+            state.menu.open = false;
+            state.next_reload = Instant::now();
+        }
+    });
 }
 pub(super) fn any_held_key(mut matches: impl FnMut(KeyCode) -> bool) -> bool {
     with(|s| s.held_keys.iter().copied().any(&mut matches))

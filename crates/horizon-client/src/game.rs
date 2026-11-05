@@ -205,6 +205,8 @@ mod native_hooks;
 #[cfg(target_os = "android")]
 mod zalith;
 #[cfg(target_os = "android")]
+mod stall;
+#[cfg(target_os = "android")]
 use android_bundled::{
     official_minimap, official_recipes, official_recipes_glue, official_zoom, smartf3,
 };
@@ -14582,6 +14584,8 @@ impl Game<'_> {
     }
     fn render(&mut self) -> Result<bool> {
         #[cfg(target_os = "android")]
+        stall::stage("frame: world and HUD");
+        #[cfg(target_os = "android")]
         let device_preferences = crate::device_runtime::preferences();
         #[cfg(target_os = "android")]
         let _native_frame = crate::device_runtime::frame(
@@ -14973,6 +14977,8 @@ impl Game<'_> {
             }
         }
         #[cfg(target_os = "android")]
+        stall::stage("frame: touch controls");
+        #[cfg(target_os = "android")]
         if crate::touch_visible() || zalith::editing() {
             let density = self.window.as_ref().map_or(1.0, |w| zalith::density(w));
             zalith::draw(
@@ -14983,6 +14989,8 @@ impl Game<'_> {
                 &self.settings,
             );
         }
+        #[cfg(target_os = "android")]
+        stall::stage("frame: pointer, IME and title");
         #[cfg(target_os = "android")]
         if self.pad.touch_ui.virtual_mouse
             && self.pad_in_menu()
@@ -15268,6 +15276,8 @@ impl Game<'_> {
             },
             chunk_fade: self.settings.chunk_fade,
         };
+        #[cfg(target_os = "android")]
+        stall::stage("frame: GPU submit");
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
                 renderer.set_pass_timing(self.debug);
@@ -15980,9 +15990,15 @@ impl Game<'_> {
 }
 impl ApplicationHandler for Game<'_> {
     #[cfg(target_os = "android")]
-    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
         // Android may recreate the surface while the IME changes window size.
         // Preserve the text session; Android hides its window on real backgrounding.
+        // Release the custom controls first so their key-ups reach the game.
+        zalith::release();
+        self.zalith_events(event_loop);
+        zalith::suspend();
+        stall::idle();
+        self.pad.custom_keys.clear();
         self.android_release_touch_keys(true);
         self.pad.chat_control_finger = None;
         self.capture(false);
@@ -20248,6 +20264,14 @@ impl Loading {
             crate::game::exit_app(event_loop);
             return;
         }
+        if self.presentation_paused() {
+            // Wake up for input and to see the worker finish, without a frame:
+            // no busy loop competing with the driver's shader compiler.
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(50),
+            ));
+            return;
+        }
         if let Some(w) = &self.window {
             if self.options.as_ref().is_some_and(|o| o.offscreen) {
                 self.draw();
@@ -20257,7 +20281,33 @@ impl Loading {
         }
         event_loop.set_control_flow(ControlFlow::Poll);
     }
+    /// Mali (r32p1 on Dimensity 1080, seen in two ANR traces) blocks
+    /// `vkQueuePresentKHR` in `vkQueueSignalReleaseImageANDROID` for as long
+    /// as the background renderer is compiling pipelines on the same device:
+    /// the event thread then stops reading input and Android reports
+    /// "not responding" after 5 s. While that worker runs, keep the last
+    /// presented frame on screen and only handle input.
+    fn presentation_paused(&self) -> bool {
+        if !cfg!(target_os = "android") {
+            return false;
+        }
+        let compiling = self
+            .renderer_job
+            .as_ref()
+            .is_some_and(|job| !job.is_finished());
+        compiling
+            && self.renderer.as_ref().is_some_and(|r| {
+                r.info.backend == wgpu::Backend::Vulkan
+                    && r.info.name.to_ascii_lowercase().contains("mali")
+            })
+    }
     fn draw(&mut self) {
+        // No batch at all while presenting is paused: glyphs rasterized into
+        // a batch that is never submitted would be cached but never uploaded.
+        if self.presentation_paused() {
+            self.menu.last_frame = None;
+            return;
+        }
         let Some(size) = self
             .renderer
             .as_ref()
@@ -20326,6 +20376,8 @@ impl Loading {
         let gui = self.gui.take().ok_or("missing menu bundle")?;
         let window = self.window.clone().ok_or("window closed")?;
         let renderer_at = Instant::now();
+        #[cfg(target_os = "android")]
+        stall::stage("handoff: world renderer");
         let renderer = if let Some(mut renderer) = self.prepared_renderer.take() {
             renderer
                 .activate_replacement(self.renderer.as_mut().ok_or("missing loading renderer")?)?;
@@ -20358,6 +20410,8 @@ impl Loading {
             self.started.elapsed().as_millis()
         );
         let renderer_ms = renderer_at.elapsed().as_millis();
+        #[cfg(target_os = "android")]
+        stall::stage("handoff: audio");
         // Audio is created on the main thread, after the core is ready.
         let audio = if !options.execution_role.is_client() {
             Audio::silent(&options.resources)
@@ -20376,6 +20430,8 @@ impl Loading {
         // like the single copy an integrated server would share.
         let res: &'static Arc<Resources> = Box::leak(Box::new(loaded.resources));
         let game_at = Instant::now();
+        #[cfg(target_os = "android")]
+        stall::stage("handoff: start_game");
         let Some(mut game) = start_game(
             res,
             loaded.pack,
@@ -20398,6 +20454,8 @@ impl Loading {
         game.world_renderer_ready = true;
         game.fullscreen = self.fullscreen;
         game.panorama_rotation = self.panorama_rotation;
+        #[cfg(target_os = "android")]
+        stall::stage("handoff: menu state and settings");
         self.menu.handoff(&mut game);
         game.apply_settings();
         game.previous = Instant::now();
@@ -20436,10 +20494,21 @@ impl ApplicationHandler for App {
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        #[cfg(target_os = "android")]
+        stall::stage(match (&*self, &event) {
+            (App::Loading(_), WindowEvent::RedrawRequested) => "loading: redraw",
+            (App::Loading(_), WindowEvent::Touch(_)) => "loading: touch",
+            (App::Loading(_), _) => "loading: window event",
+            (App::Ready(_), WindowEvent::RedrawRequested) => "game: redraw",
+            (App::Ready(_), WindowEvent::Touch(_)) => "game: touch",
+            (App::Ready(_), _) => "game: window event",
+        });
         match self {
             App::Loading(loading) => loading.window_event(event_loop, id, event),
             App::Ready(game) => game.window_event(event_loop, id, event),
         }
+        #[cfg(target_os = "android")]
+        stall::idle();
     }
     fn device_event(&mut self, event_loop: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
         match self {
@@ -20457,6 +20526,12 @@ impl ApplicationHandler for App {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        let _stall = stall::scope(if matches!(self, App::Ready(_)) {
+            "game: frame"
+        } else {
+            "loading: frame"
+        });
         enum Step {
             Waiting,
             Ready(Box<split::Split<'static>>),
@@ -20607,6 +20682,8 @@ fn loading_app(
 
 #[cfg(target_os = "android")]
 pub(crate) fn android_game(arguments: Vec<String>) -> Result<Box<dyn ApplicationHandler>> {
+    stall::start();
+    zalith::reset_session();
     horizon_client::auth::clear_current();
     let mut options = Options::read_arguments(arguments)?.ok_or("missing Android options")?;
     if crate::performance::active() {

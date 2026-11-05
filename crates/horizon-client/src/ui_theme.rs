@@ -180,13 +180,18 @@ impl Cache {
     /// Reserve `w x h` pixels; on overflow forget everything and start over.
     fn place(&mut self, atlas: &HudAtlas, w: u32, h: u32) -> Option<(u32, u32, Rect)> {
         let region = Self::region(atlas)?;
+        // A mask that can never fit must not evict everything else: doing so
+        // made every label re-rasterize on every frame (a stalled main thread).
+        if w + 1 > region.w || h > region.h {
+            return None;
+        }
         let (mut x, mut y, mut row) = self.shelf;
         if x + w + 1 > region.w {
             x = 0;
             y += row + 1;
             row = 0;
         }
-        if y + h > region.h || w > region.w {
+        if y + h > region.h {
             self.entries.clear();
             self.shelf = (0, 0, 0);
             return None;
@@ -229,10 +234,12 @@ impl Cache {
         }
         let scale = self.fonts.scale(face, f32::from(size) / 4.0);
         let glyph = id.with_scale_and_position(scale, ab_glyph::point(0.0, 0.0));
+        let mut oversized = false;
         let made = match self.fonts.face(face).outline_glyph(glyph) {
             Some(outline) => {
                 let b = outline.px_bounds();
                 let (w, h) = (b.width() as u32, b.height() as u32);
+                oversized = Self::region(atlas).is_some_and(|r| w + 1 > r.w || h > r.h);
                 let mut alpha = vec![0.0; (w * h) as usize];
                 outline.draw(|x, y, c| {
                     if x < w && y < h {
@@ -255,7 +262,9 @@ impl Cache {
                 top: 0.0,
             },
         };
-        if made.rect.is_some() || made.left == 0.0 {
+        // Also remember glyphs too large for the region: retrying them each
+        // frame only repeats the same rasterization and fails again.
+        if made.rect.is_some() || made.left == 0.0 || oversized {
             self.entries.insert(key, made);
         }
         made
