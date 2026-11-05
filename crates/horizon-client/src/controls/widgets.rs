@@ -2,7 +2,7 @@
 //! the design system's dark palette, laid out in physical pixels. A frame
 //! records where each action's button is; a tap looks it up.
 use super::Rect;
-use crate::ui_theme::{Face, Ui, color, mybezo};
+use crate::ui_theme::{Face, Ui, color};
 
 pub(super) struct Hits<A> {
     list: Vec<(A, Rect)>,
@@ -47,12 +47,13 @@ impl<A: Clone> Hits<A> {
     }
 }
 
-pub(super) const PLATE: u32 = mybezo::PANEL;
-pub(super) const RAISED: u32 = mybezo::RAISED;
+pub(super) const PLATE: u32 = color::hex(0x24292d, 250);
+pub(super) const RAISED: u32 = color::hex(0x34393c, 255);
+pub(super) const SELECTED: u32 = color::hex(0x364b57, 255);
 pub(super) const TEXT: u32 = color::TEXT;
 pub(super) const MUTED: u32 = color::MUTED;
-pub(super) const ACCENT: u32 = mybezo::ACCENT;
-pub(super) const ON_ACCENT: u32 = mybezo::INK;
+pub(super) const ACCENT: u32 = color::hex(0x97cff0, 255);
+pub(super) const ON_ACCENT: u32 = color::hex(0x10242f, 255);
 
 pub(super) fn plate(ui: &mut Ui, r: Rect, radius: f32, colour: u32) {
     ui.rounded_px(
@@ -109,7 +110,7 @@ pub(super) fn button<A: Clone>(
     primary: bool,
     action: A,
 ) {
-    plate(ui, r, r.h * 0.18, if primary { ACCENT } else { RAISED });
+    plate(ui, r, r.h * 0.32, if primary { ACCENT } else { RAISED });
     let label = ui.fit_text(Face::Medium, 13.0, label, (r.w / ui.density - 8.0).max(0.0));
     centred(
         ui,

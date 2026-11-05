@@ -1,10 +1,10 @@
 //! Explicit, scrollable selections. Values never cycle on repeated button taps.
 use super::{
     Launcher,
-    pages::{Action, button},
+    pages::{Action, LAUNCH_BLUE, SHELL, button},
 };
 use crate::catalog::RendererMode;
-use horizon_client::ui_theme::{Face, Ui, color, mybezo};
+use horizon_client::ui_theme::{Face, Ui, color};
 
 pub(super) enum Kind {
     Aspect,
@@ -302,7 +302,7 @@ impl Chooser {
     pub fn draw(&mut self, ui: &mut Ui, targets: &mut Vec<([f32; 4], Action)>) {
         let (w, h) = (ui.w, ui.h);
         targets.clear();
-        ui.rounded(0.0, 0.0, w, h, 0.0, mybezo::BACKGROUND);
+        ui.rounded(0.0, 0.0, w, h, 0.0, SHELL);
         for i in 0..24u8 {
             ui.rounded(
                 0.0,
@@ -331,13 +331,13 @@ impl Chooser {
             }
             super::pages::card(ui, 22.0, y, w - 44.0, 76.0, 16.0);
             if *selected {
-                ui.border(22.0, y, w - 44.0, 76.0, 16.0, mybezo::ACCENT);
+                ui.border(22.0, y, w - 44.0, 76.0, 16.0, LAUNCH_BLUE);
             }
-            let ring = if *selected { mybezo::ACCENT } else { color::MUTED };
+            let ring = if *selected { LAUNCH_BLUE } else { color::MUTED };
             ui.rounded(34.0, y + 10.0, 22.0, 22.0, 11.0, ring);
-            ui.rounded(36.0, y + 12.0, 18.0, 18.0, 9.0, mybezo::BACKGROUND);
+            ui.rounded(36.0, y + 12.0, 18.0, 18.0, 9.0, SHELL);
             if *selected {
-                ui.rounded(40.0, y + 16.0, 10.0, 10.0, 5.0, mybezo::ACCENT);
+                ui.rounded(40.0, y + 16.0, 10.0, 10.0, 5.0, LAUNCH_BLUE);
             }
             ui.text(Face::Medium, 18.0, 70.0, y + 8.0, color::TEXT, label);
             let detail = ui.fit_text(Face::Regular, 13.5, detail, w - 110.0);

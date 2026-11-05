@@ -1,7 +1,7 @@
 use super::*;
 use horizon_client::{
     osk::Output,
-    ui_theme::{color, mybezo},
+    ui_theme::color,
 };
 use winit::{
     event::{KeyEvent, Touch},
@@ -92,23 +92,22 @@ pub(super) enum Action {
 
 pub(super) const BACKGROUND_SPRITE: &str = "mybezo/launcher-background";
 
-/// The launcher's layered look: glass surfaces over the art, sunk wells for
-/// fields, a glowing two-tone pill for the one big action.
+/// Shared launcher surfaces used by the catalogue, account dialog and settings.
 pub(super) mod style {
     use horizon_client::ui_theme::color::hex;
     /// Cards and secondary buttons.
-    pub const SURFACE: u32 = hex(0x1b1428, 226);
-    pub const SURFACE_HI: u32 = hex(0x2a1f3b, 242);
+    pub const PANEL: u32 = hex(0x25292d, 255);
+    pub const SURFACE: u32 = hex(0x34393c, 255);
+    pub const SURFACE_HI: u32 = hex(0x3d4549, 255);
     /// Fields and switch tracks.
-    pub const WELL: u32 = hex(0x0c0811, 224);
-    pub const LINE: u32 = hex(0x47345f, 255);
-    pub const LINE_SOFT: u32 = hex(0x47345f, 150);
+    pub const WELL: u32 = hex(0x25292d, 255);
+    pub const LINE: u32 = hex(0x536167, 255);
+    pub const LINE_SOFT: u32 = hex(0x536167, 150);
     pub const SHADOW: u32 = hex(0x000000, 96);
     pub const SHEEN: u32 = hex(0xffffff, 26);
-    pub const SHEEN_STRONG: u32 = hex(0xffffff, 54);
-    pub const GLOW: u32 = hex(0xdab5ff, 46);
-    pub const GLOW_SOFT: u32 = hex(0xdab5ff, 20);
-    pub const TEXT_SOFT: u32 = hex(0xbcb1cf, 255);
+    pub const GLOW: u32 = hex(0x97cff0, 46);
+    pub const GLOW_SOFT: u32 = hex(0x97cff0, 20);
+    pub const TEXT_SOFT: u32 = hex(0xbdc7cd, 255);
     pub const SUCCESS: u32 = hex(0x45c27a, 255);
     pub const DANGER: u32 = hex(0xf07a68, 255);
 }
@@ -204,7 +203,7 @@ fn page_icon(page: Page) -> &'static str {
         Page::Packs => "image",
         Page::Shaders => "zap",
         Page::Installed => "archive",
-        Page::Settings => "sliders",
+        Page::Settings => "settings",
         Page::Skins => "user",
     }
 }
@@ -252,10 +251,11 @@ impl SettingsSection {
     }
 }
 
-const SHELL: u32 = color::hex(0x1d2024, 255);
+pub(super) const SHELL: u32 = color::hex(0x1d2024, 255);
 const SHEET: u32 = color::hex(0x34393c, 255);
 const SELECTED: u32 = color::hex(0x364b57, 255);
-const LAUNCH_BLUE: u32 = color::hex(0x97cff0, 255);
+pub(super) const LAUNCH_BLUE: u32 = color::hex(0x97cff0, 255);
+const LAUNCH_INK: u32 = color::hex(0x10242f, 255);
 
 fn center_text(ui: &mut Ui, face: Face, size: f32, center: f32, y: f32, width: f32, fg: u32, text: &str) {
     let label = ui.fit_text(face, size, text, width);
@@ -288,15 +288,19 @@ fn rail_item(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
     y: f32,
+    step: f32,
     icon: &str,
     label: &str,
     active: bool,
     action: Action,
 ) {
-    nav_item(ui, targets, [14.0, y, 64.0, 36.0], icon, None, active, action);
-    center_text(ui, Face::Regular, 11.5, 46.0, y + 38.0, 84.0, color::TEXT, label);
+    let icon_height = (step - 20.0).clamp(22.0, 36.0);
+    nav_item(ui, targets, [14.0, y, 64.0, icon_height], icon, None, active, action);
+    if step >= 42.0 {
+        center_text(ui, Face::Regular, 11.5, 46.0, y + icon_height + 2.0, 84.0, color::TEXT, label);
+    }
     if let Some((rect, _)) = targets.last_mut() {
-        *rect = [4.0, y, 84.0, 57.0];
+        *rect = [4.0, y, 84.0, (step - 1.0).max(icon_height)];
     }
 }
 
@@ -321,24 +325,14 @@ fn avatar(ui: &mut Ui, x: f32, y: f32, size: f32) {
     }
 }
 
-/// One tab of the navigation bar: a glowing pill when open, icon and label otherwise.
+/// A page link inside a dialog or content panel.
 fn tab(ui: &mut Ui, rect: [f32; 4], label: &str, page: Page, active: bool) {
     let [x, y, w, h] = rect;
     let radius = (h * 0.5).min(16.0);
     if active {
-        ui.rounded(x - 2.0, y - 2.0, w + 4.0, h + 4.0, radius + 2.0, style::GLOW);
-        ui.rounded(x, y, w, h, radius, mybezo::WARM);
-        ui.rounded(x, y, w, h - 2.0, radius, mybezo::ACCENT);
-        ui.rounded(
-            x + 4.0,
-            y + 2.0,
-            w - 8.0,
-            h * 0.4,
-            (radius - 3.0).max(0.0),
-            style::SHEEN_STRONG,
-        );
+        ui.rounded(x, y, w, h, radius, SELECTED);
     }
-    let fg = if active { mybezo::INK } else { style::TEXT_SOFT };
+    let fg = if active { color::TEXT } else { style::TEXT_SOFT };
     let icon = page_icon(page);
     if w < 100.0 {
         let size: f32 = 16.0;
@@ -399,38 +393,19 @@ pub(super) fn button(
     };
     let radius = (h * 0.5).min(18.0);
 
-    ui.rounded(x, y + 3.0, w, h, radius, style::SHADOW);
-    if accent {
-        ui.rounded(x - 4.0, y - 3.0, w + 8.0, h + 8.0, radius + 4.0, style::GLOW_SOFT);
-        ui.rounded(x - 2.0, y - 1.0, w + 4.0, h + 4.0, radius + 2.0, style::GLOW);
-        ui.rounded(x, y, w, h, radius, mybezo::WARM);
-        ui.rounded(x, y, w, h - 3.0, radius, mybezo::ACCENT);
-        ui.rounded(
-            x + 4.0,
-            y + 2.0,
-            w - 8.0,
-            (h * 0.42).max(1.0),
-            (radius - 3.0).max(0.0),
-            style::SHEEN_STRONG,
-        );
+    let fill = if accent {
+        LAUNCH_BLUE
     } else if field {
-        ui.rounded(x, y, w, h, radius, style::WELL);
-        ui.border(x, y, w, h, radius, style::LINE);
+        style::WELL
     } else {
-        ui.rounded(x, y, w, h, radius, style::SURFACE_HI);
-        ui.border(x, y, w, h, radius, style::LINE);
-        ui.rounded(
-            x + radius,
-            y + 1.0,
-            (w - 2.0 * radius).max(0.0),
-            1.0,
-            0.0,
-            style::SHEEN,
-        );
+        style::SURFACE_HI
+    };
+    ui.rounded(x, y, w, h, radius, fill);
+    if field {
+        ui.border(x, y, w, h, radius, style::LINE_SOFT);
     }
-
     let fg = if accent {
-        mybezo::INK
+        LAUNCH_INK
     } else if field {
         style::TEXT_SOFT
     } else {
@@ -536,7 +511,7 @@ fn toggle(
     let ty = y + (h - th) * 0.5;
     if on {
         ui.rounded(tx - 2.0, ty - 2.0, tw + 4.0, th + 4.0, th * 0.5 + 2.0, style::GLOW);
-        ui.rounded(tx, ty, tw, th, th * 0.5, mybezo::ACCENT);
+        ui.rounded(tx, ty, tw, th, th * 0.5, LAUNCH_BLUE);
     } else {
         ui.rounded(tx, ty, tw, th, th * 0.5, style::WELL);
         ui.border(tx, ty, tw, th, th * 0.5, style::LINE);
@@ -678,7 +653,7 @@ impl Launcher {
         };
         let mut right = w - 12.0;
         for (icon, label, selected, action) in [
-            ("sliders", "Pengaturan", settings, Action::Page(Page::Settings)),
+            ("settings", "Pengaturan", settings, Action::Page(Page::Settings)),
             ("download", "Unduh", download, Action::Page(Page::Game)),
             ("user", "Akun", false, Action::Account),
         ] {
@@ -693,10 +668,10 @@ impl Launcher {
         let title = ui.fit_text(Face::Medium, 20.0, &title, (right - title_x - 4.0).max(0.0));
         ui.text(Face::Medium, 20.0, title_x, 10.0, color::TEXT, &title);
         if settings || download {
-            let spacing = ((h - 66.0) / 6.0).clamp(59.0, 76.0);
+            let spacing = ((h - 64.0) / 6.0).clamp(24.0, 76.0);
             if settings {
                 for (i, section) in SettingsSection::ALL.into_iter().enumerate() {
-                    rail_item(&mut ui, &mut self.targets, 57.0 + i as f32 * spacing,
+                    rail_item(&mut ui, &mut self.targets, 57.0 + i as f32 * spacing, spacing,
                         section.icon(), section.label(), self.settings_section == section,
                         Action::SettingsSection(section));
                 }
@@ -704,7 +679,7 @@ impl Launcher {
                 for (i, item) in [Page::Game, Page::Mods, Page::Packs, Page::Shaders, Page::Installed, Page::Skins]
                     .into_iter().enumerate()
                 {
-                    rail_item(&mut ui, &mut self.targets, 57.0 + i as f32 * spacing,
+                    rail_item(&mut ui, &mut self.targets, 57.0 + i as f32 * spacing, spacing,
                         page_icon(item), item.name(), page == item, Action::Page(item));
                 }
             }
@@ -720,7 +695,7 @@ impl Launcher {
                 let height = if w >= h { h - 69.0 } else { (h * 0.50).min(370.0) };
                 (w - width - 14.0, h - height - 14.0, width, height)
             } else {
-                (left + 7.0, 96.0, w - left - 21.0, 78.0)
+                (left + 7.0, 63.0, w - left - 21.0, 78.0)
             };
             let center = x + width * 0.5;
             let launch = if installed { "Luncurkan" } else if self.error.is_some() { "Coba lagi" } else { "Unduh" };
@@ -759,14 +734,16 @@ impl Launcher {
                 ui.text(Face::Medium, 15.0, x + 48.0, vy + 4.0, color::TEXT, &version);
                 ui.text(Face::Regular, 12.0, x + 48.0, vy + 26.0, color::MUTED, "Horizon");
                 nav_item(&mut ui, &mut self.targets, [x + width - 46.0, vy + 3.0, 38.0, 40.0],
-                    "sliders", None, false, Action::Page(Page::Settings));
+                    "settings", None, false, Action::Page(Page::Settings));
             } else {
-                let release = "Rilis";
-                ui.rounded(x, 57.0, 85.0, 30.0, 12.0, SELECTED);
-                center_text(&mut ui, Face::Medium, 13.0, x + 42.5, 63.0, 75.0, color::TEXT, release);
                 ui.icon("package", x + 15.0, y + 23.0, 27.0, color::TEXT);
-                let version = ui.fit_text(Face::Medium, 17.0, &version, width - 210.0);
-                ui.text(Face::Medium, 17.0, x + 55.0, y + 13.0, color::TEXT, &version);
+                let version_space = width - 78.0 - (width * 0.38).min(142.0);
+                let version = ui.fit_text(Face::Medium, 17.0, &version, version_space.max(10.0));
+                let title_width = ui.text(Face::Medium, 17.0, x + 55.0, y + 13.0, color::TEXT, &version);
+                if version_space - title_width >= 60.0 {
+                    chip(&mut ui, x + 65.0 + title_width, y + 14.0,
+                        "Rilis", color::TEXT, SELECTED);
+                }
                 ui.text(Face::Regular, 13.0, x + 55.0, y + 38.0, color::MUTED,
                     if installed { "Terpasang · Horizon" } else { "Tersedia untuk Horizon" });
             }
@@ -789,7 +766,7 @@ impl Launcher {
             } else {
                 ui.rounded(bx, by, bw, bh, bh * 0.5, LAUNCH_BLUE);
                 center_text(&mut ui, Face::Medium, 16.0, bx + bw * 0.5, by + (bh - 23.0) * 0.5,
-                    bw - 14.0, color::hex(0x10242f, 255), launch);
+                    bw - 14.0, LAUNCH_INK, launch);
                 self.targets.push(([bx, by, bw, bh], Action::Play));
             }
         } else if page == Page::Skins {
@@ -798,7 +775,7 @@ impl Launcher {
             self.list_view = Some(self.wardrobe.view);
             self.catalog.scroll = self.catalog.scroll.min(self.wardrobe.view[2]);
         } else if page.is_catalog() {
-            ui.icon(page_icon(page), left + 32.0, 61.0, 20.0, mybezo::ACCENT);
+            ui.icon(page_icon(page), left + 32.0, 61.0, 20.0, LAUNCH_BLUE);
             ui.text(
                 Face::SemiBold,
                 18.0,
@@ -952,8 +929,8 @@ impl Launcher {
                 }
                 let on = self.catalog.bundled_enabled.contains(*id);
                 card(&mut ui, left + 22.0, y - 4.0, w - left - 44.0, 70.0, 16.0);
-                ui.rounded(left + 32.0, y + 7.0, 44.0, 44.0, 12.0, color::hex(0xdab5ff, if on { 70 } else { 26 }));
-                ui.icon("zap", left + 42.0, y + 17.0, 24.0, if on { mybezo::ACCENT } else { style::TEXT_SOFT });
+                ui.rounded(left + 32.0, y + 7.0, 44.0, 44.0, 12.0, color::hex(0x97cff0, if on { 70 } else { 26 }));
+                ui.icon("zap", left + 42.0, y + 17.0, 24.0, if on { LAUNCH_BLUE } else { style::TEXT_SOFT });
                 let title = ui.fit_text(Face::Medium, 18.0, title, (w - left - 340.0).max(60.0));
                 let summary = ui.fit_text(Face::Regular, 13.5, description, (w - left - 262.0).max(24.0));
                 let title_w = ui.text(Face::Medium, 18.0, left + 90.0, y + 4.0, color::TEXT, &title);
@@ -962,7 +939,7 @@ impl Launcher {
                     left + 96.0 + title_w,
                     y + 6.0,
                     if on { "ON" } else { "BUILT-IN" },
-                    if on { mybezo::INK } else { style::TEXT_SOFT },
+                    if on { LAUNCH_INK } else { style::TEXT_SOFT },
                     if on { style::SUCCESS } else { style::LINE_SOFT },
                 );
                 ui.text(Face::Regular, 13.5, left + 90.0, y + 32.0, color::MUTED, &summary);
@@ -1003,7 +980,7 @@ impl Launcher {
                     20.0,
                     left + 32.0 + (44.0 - initial_w) * 0.5,
                     y + 15.0,
-                    mybezo::ACCENT,
+                    LAUNCH_BLUE,
                     &initial,
                 );
                 let title = ui.fit_text(Face::Medium, 18.0, &p.title, (w - left - 262.0).max(24.0));
@@ -1011,7 +988,7 @@ impl Launcher {
                 ui.text(Face::Medium, 18.0, left + 90.0, y + 4.0, color::TEXT, &title);
                 ui.text(Face::Regular, 13.5, left + 90.0, y + 32.0, color::MUTED, &summary);
                 if let Some(state) = download {
-                    ui.text(Face::Medium, 15.0, w - 154.0, y + 19.0, mybezo::ACCENT, &state);
+                    ui.text(Face::Medium, 15.0, w - 154.0, y + 19.0, LAUNCH_BLUE, &state);
                 } else if p.kind == crate::browser::Kind::Mod
                     && p.source == crate::browser::SourceId::Modrinth
                 {
@@ -1160,7 +1137,7 @@ impl Launcher {
                         3.0,
                         row_height - 30.0,
                         1.5,
-                        if item.enabled { mybezo::ACCENT } else { style::LINE },
+                        if item.enabled { LAUNCH_BLUE } else { style::LINE },
                     );
                     let title = ui.fit_text(
                         Face::Medium,
@@ -1351,7 +1328,13 @@ impl Launcher {
                 ui.text(Face::Medium, 17.0, text_x, y + 11.0, color::TEXT, &title);
                 let value = ui.fit_text(Face::Regular, 14.0, &value, rect[2] - 62.0);
                 ui.text(Face::Regular, 14.0, text_x, y + 39.0, color::MUTED, &value);
-                ui.icon("chevron-right", w - 47.0, y + 25.0, 22.0, color::TEXT);
+                let icon = match action {
+                    Action::Renderer | Action::RenderScale | Action::DisplayHz
+                    | Action::Orientation | Action::InputHost | Action::Aspect | Action::Profile
+                    | Action::WorkerLimit | Action::CacheBudget => "chevron-down",
+                    _ => "chevron-right",
+                };
+                ui.icon(icon, w - 47.0, y + 25.0, 22.0, color::TEXT);
                 self.targets.push((rect, action));
             }
         }
@@ -1396,7 +1379,7 @@ impl Launcher {
             let thumb = (height * height / (height + maximum)).max(20.0).min(height);
             let y = top + (height - thumb) * (scroll / maximum).clamp(0.0, 1.0);
             ui.rounded(w - 12.0, top, 4.0, height, 2.0, style::LINE_SOFT);
-            ui.rounded(w - 13.0, y, 6.0, thumb, 3.0, mybezo::ACCENT);
+            ui.rounded(w - 13.0, y, 6.0, thumb, 3.0, LAUNCH_BLUE);
         }
         let caret_visible = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1435,10 +1418,10 @@ impl Launcher {
             let y = (h - 168.0) * 0.5;
             ui.rounded(x - 3.0, y - 3.0, width + 6.0, 174.0, 25.0, style::GLOW_SOFT);
             ui.rounded(x, y + 6.0, width, 168.0, 22.0, style::SHADOW);
-            ui.rounded(x, y, width, 168.0, 22.0, mybezo::PANEL);
+            ui.rounded(x, y, width, 168.0, 22.0, style::PANEL);
             ui.border(x, y, width, 168.0, 22.0, style::LINE);
-            ui.rounded(x + 20.0, y + 20.0, 40.0, 40.0, 12.0, color::hex(0xdab5ff, 40));
-            ui.icon("arrow-left", x + 28.0, y + 28.0, 24.0, mybezo::ACCENT);
+            ui.rounded(x + 20.0, y + 20.0, 40.0, 40.0, 12.0, color::hex(0x97cff0, 40));
+            ui.icon("arrow-left", x + 28.0, y + 28.0, 24.0, LAUNCH_BLUE);
             ui.text(
                 Face::SemiBold,
                 21.0,
@@ -1485,7 +1468,7 @@ impl Launcher {
             && let Some(([x, y, w, h], _)) = self.targets.get(index)
         {
             let radius = (*h * 0.5).min(18.0) + 3.0;
-            ui.border(*x - 3.0, *y - 3.0, *w + 6.0, *h + 6.0, radius, mybezo::ACCENT);
+            ui.border(*x - 3.0, *y - 3.0, *w + 6.0, *h + 6.0, radius, LAUNCH_BLUE);
             ui.border(*x - 4.0, *y - 4.0, *w + 8.0, *h + 8.0, radius + 1.0, style::GLOW);
             self.cursor = (
                 f64::from((x + w / 2.0) * ui.density),

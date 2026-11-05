@@ -3,7 +3,7 @@
 //! gestures, the gyroscope, the controls' opacity, the keyboard).
 use super::widgets::{self, Hits, MUTED, TEXT};
 use super::*;
-use crate::ui_theme::{Face, color::with_alpha, mybezo};
+use crate::ui_theme::{Face, color::with_alpha};
 
 /// The player's touch settings the menu changes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -252,7 +252,7 @@ impl Menu {
     }
 
     pub(super) fn gear(ui: &mut Ui, x: f32, y: f32, r: f32, opacity: f32) {
-        let gear_color = with_alpha(mybezo::ACCENT, opacity);
+        let gear_color = with_alpha(widgets::ACCENT, opacity);
         let scale = ui.batch.scale;
         let atlas = ui.atlas;
         // A hollow gear drawn as one ring of quads. Its centre and surrounding
@@ -281,77 +281,87 @@ impl Menu {
     }
 
     fn draw_panel(&mut self, ui: &mut Ui, screen: Screen, s: Settings) {
-        let d = screen
-            .density
-            .min(screen.height / 276.0)
-            .min(screen.width / 336.0);
+        let wide = screen.width >= screen.height * 1.45;
+        let columns = if wide { 674.0 } else { 338.0 };
+        let d = screen.density.min(screen.height / 338.0).min(screen.width / columns);
         let text_scale = d / ui.density;
-        let p = Rect {
-            x: screen.width - 332.0 * d,
-            y: (screen.height - 260.0 * d) * 0.5,
+        let panel = |left| Rect {
+            x: if left { 8.0 * d } else { screen.width - 330.0 * d },
+            y: (screen.height - 320.0 * d) * 0.5,
             w: 322.0 * d,
-            h: 260.0 * d,
+            h: 320.0 * d,
         };
-        widgets::plate(ui, p, 11.0 * d, mybezo::PANEL);
-        ui.border_px(
-            p.x,
-            p.y,
-            p.x + p.w,
-            p.y + p.h,
-            [11.0 * d; 4],
-            d.max(1.0),
-            mybezo::BORDER,
-        );
+        let first = panel(wide);
+        if wide {
+            self.draw_section(ui, first, d, text_scale, true, false, s,
+                if self.tab == Tab::Input { Tab::Input } else { Tab::Controls });
+            self.draw_section(ui, panel(false), d, text_scale, true, true, s, Tab::Display);
+        } else {
+            self.draw_section(ui, first, d, text_scale, false, false, s, self.tab);
+        }
+    }
+
+    fn draw_section(
+        &mut self,
+        ui: &mut Ui,
+        panel: Rect,
+        d: f32,
+        text_scale: f32,
+        split: bool,
+        display_column: bool,
+        s: Settings,
+        tab: Tab,
+    ) {
+        widgets::plate(ui, panel, 18.0 * d, widgets::PLATE);
         let rect = |x: f32, y: f32, w: f32, h: f32| Rect {
-            x: p.x + x * d,
-            y: p.y + y * d,
+            x: panel.x + x * d,
+            y: panel.y + y * d,
             w: w * d,
             h: h * d,
         };
-        widgets::text(
-            ui,
-            p.x + 14.0 * d,
-            p.y + 10.0 * d,
-            9.0 * text_scale,
-            Face::SemiBold,
-            mybezo::ACCENT,
-            "MYBEZO EDITION",
-        );
-        widgets::text(
-            ui,
-            p.x + 14.0 * d,
-            p.y + 23.0 * d,
-            18.0 * text_scale,
-            Face::SemiBold,
-            TEXT,
-            "Game tools",
-        );
-        let close = rect(276.0, 8.0, 34.0, 34.0);
-        self.action(ui, close, "×", Choice::Close, false, text_scale);
-        for (i, (label, tab)) in [
-            ("Controls", Tab::Controls), ("Mouse & keys", Tab::Input), ("Display", Tab::Display),
-        ].into_iter().enumerate() {
-            widgets::button(ui, &mut self.hits,
-                rect(12.0 + i as f32 * 101.0, 51.0, 96.0, 30.0),
-                label, self.tab == tab, Target::Tab(tab));
+        widgets::text(ui, panel.x + 14.0 * d, panel.y + 12.0 * d,
+            17.0 * text_scale, Face::Medium, TEXT,
+            if display_column { "Game Menu" } else { "Input Settings" });
+        if !split || display_column {
+            self.action(ui, rect(276.0, 8.0, 34.0, 32.0), "×", Choice::Close, false, text_scale);
         }
+        if !display_column {
+            let tabs: &[(&str, Tab)] = if split {
+                &[("Controls", Tab::Controls), ("Mouse & Keys", Tab::Input)]
+            } else {
+                &[("Controls", Tab::Controls), ("Mouse & Keys", Tab::Input), ("Display", Tab::Display)]
+            };
+            let width = 302.0 / tabs.len() as f32;
+            for (i, &(label, choice)) in tabs.iter().enumerate() {
+                let area = rect(10.0 + i as f32 * width, 49.0, width - 4.0, 33.0);
+                if tab == choice {
+                    widgets::plate(ui, area, area.h * 0.5, widgets::SELECTED);
+                }
+                widgets::centred(ui, area, 12.0 * text_scale, Face::Medium, TEXT, label);
+                self.hits.push(Target::Tab(choice), area);
+            }
+        }
+        let top = if display_column { 54.0 } else { 96.0 };
         let size = match s.size {
-            Some(size) => format!("Size {:.0}%", size * 100.0),
-            None => format!("Size auto {:.0}%", s.fitted * 100.0),
+            Some(size) => format!("Control size · {:.0}%", size * 100.0),
+            None => format!("Control size · Auto {:.0}%", s.fitted * 100.0),
         };
         let control_actions = [
-            ("Edit controls", Choice::EditControls),
+            ("Edit layout", Choice::EditControls),
             ("Import layout", Choice::ImportControls),
             (size.as_str(), Choice::Size),
         ];
-        let actions: &[(&str, Choice)] = match self.tab {
+        let actions: &[(&str, Choice)] = match tab {
             Tab::Controls => &control_actions,
-            Tab::Input => &[("Keyboard", Choice::Keyboard)],
+            Tab::Input => &[("Open keyboard", Choice::Keyboard)],
             Tab::Display => &[("Pause", Choice::Pause), ("Minimize", Choice::Minimize)],
         };
+        let columns = if tab == Tab::Controls { 1 } else { 2 };
+        let width = 302.0 / columns as f32;
         for (i, &(label, choice)) in actions.iter().enumerate() {
-            self.action(ui, rect(12.0 + (i % 2) as f32 * 152.0, 91.0 + (i / 2) as f32 * 34.0,
-                146.0, 30.0), label, choice, choice == Choice::EditControls, text_scale);
+            let row = rect(12.0 + (i % columns) as f32 * width, top + (i / columns) as f32 * 35.0,
+                width - 4.0, 31.0);
+            self.action(ui, row, label, choice, choice == Choice::EditControls, text_scale);
         }
         let control_toggles = [
             ("Gestures", s.gestures, Choice::Gestures),
@@ -359,14 +369,15 @@ impl Menu {
         ];
         let input_toggles = [("Virtual pointer", s.virtual_mouse, Choice::VirtualMouse)];
         let display_toggles = [("Show controls", !s.controls_hidden, Choice::HideControls)];
-        let toggles: &[(&str, bool, Choice)] = match self.tab {
+        let toggles: &[(&str, bool, Choice)] = match tab {
             Tab::Controls => &control_toggles,
             Tab::Input => &input_toggles,
             Tab::Display => &display_toggles,
         };
+        let rows = actions.len().div_ceil(columns) as f32;
+        let toggle_y = top + 8.0 + rows * 35.0;
         for (index, &(label, enabled, choice)) in toggles.iter().enumerate() {
-            let top = if self.tab == Tab::Controls { 161.0 } else { 128.0 };
-            let row = rect(12.0, top + index as f32 * 29.0, 298.0, 25.0);
+            let row = rect(15.0, toggle_y + index as f32 * 31.0, 292.0, 28.0);
             widgets::text(
                 ui,
                 row.x + 3.0 * d,
@@ -388,9 +399,9 @@ impl Menu {
                 },
                 8.0 * d,
                 if enabled {
-                    mybezo::ACCENT
+                    widgets::ACCENT
                 } else {
-                    mybezo::RAISED
+                    widgets::RAISED
                 },
             );
             widgets::plate(
@@ -402,26 +413,23 @@ impl Menu {
                     h: 12.0 * d,
                 },
                 6.0 * d,
-                if enabled { mybezo::INK } else { MUTED },
+                if enabled { widgets::ON_ACCENT } else { MUTED },
             );
             self.hits.push(Target::Choose(choice), row);
         }
-        let input_sliders = [(
-            Slider::Camera,
-            "Camera sensitivity",
-            (s.camera_sensitivity * 100.0 - 1.0) / 999.0,
-        )];
+        let input_sliders = [(Slider::Camera, "Camera sensitivity", (s.camera_sensitivity * 100.0 - 1.0) / 999.0)];
         let display_sliders = [
             (Slider::Opacity, "Controls opacity", (s.opacity * 100.0 - 10.0) / 90.0),
             (Slider::GearOpacity, "Gear opacity", (s.gear_opacity * 100.0 - 10.0) / 90.0),
         ];
-        let sliders: &[(Slider, &str, f32)] = match self.tab {
+        let sliders: &[(Slider, &str, f32)] = match tab {
             Tab::Controls => &[],
             Tab::Input => &input_sliders,
             Tab::Display => &display_sliders,
         };
+        let slider_y = toggle_y + toggles.len() as f32 * 31.0 + 12.0;
         for (index, &(kind, name, fraction)) in sliders.iter().enumerate() {
-            let row = rect(15.0, 165.0 + index as f32 * 37.0, 292.0, 33.0);
+            let row = rect(16.0, slider_y + index as f32 * 43.0, 290.0, 37.0);
             let fraction = self
                 .drag
                 .as_ref()
@@ -448,7 +456,7 @@ impl Menu {
                 row.y,
                 11.0 * text_scale,
                 Face::SemiBold,
-                mybezo::ACCENT,
+                widgets::ACCENT,
                 &value,
             );
             if kind == Slider::GearOpacity {
@@ -469,7 +477,7 @@ impl Menu {
                     ..row
                 },
                 2.0 * d,
-                mybezo::RAISED,
+                widgets::RAISED,
             );
             if fraction > 0.0 {
                 widgets::plate(
@@ -481,7 +489,7 @@ impl Menu {
                         ..row
                     },
                     2.0 * d,
-                    mybezo::ACCENT,
+                    widgets::ACCENT,
                 );
             }
             widgets::plate(
@@ -493,7 +501,7 @@ impl Menu {
                     h: 10.0 * d,
                 },
                 5.0 * d,
-                mybezo::ACCENT,
+                widgets::ACCENT,
             );
             self.sliders.push((kind, row));
         }
@@ -511,11 +519,11 @@ impl Menu {
         widgets::plate(
             ui,
             r,
-            r.h * 0.20,
+            r.h * 0.50,
             if primary {
-                mybezo::ACCENT
+                widgets::ACCENT
             } else {
-                mybezo::RAISED
+                widgets::RAISED
             },
         );
         widgets::centred(
@@ -523,7 +531,7 @@ impl Menu {
             r,
             12.0 * scale,
             Face::SemiBold,
-            if primary { mybezo::INK } else { TEXT },
+            if primary { widgets::ON_ACCENT } else { TEXT },
             label,
         );
         self.hits.push(Target::Choose(choice), r);
@@ -555,6 +563,30 @@ mod tests {
             density: 2.0,
             dark: true,
         }
+    }
+
+    #[test]
+    fn landscape_keeps_input_and_game_actions_accessible_together() {
+        let atlas = HudAtlas::boot();
+        let screen = screen();
+        let mut batch = HudBatch::new([1280, 720]);
+        let mut menu = Menu::new((0.95, 0.12));
+        menu.open = true;
+        menu.draw(&mut batch, &atlas, screen, settings());
+
+        let edit = menu.hits.find(&Target::Choose(Choice::EditControls)).unwrap();
+        let pause = menu.hits.find(&Target::Choose(Choice::Pause)).unwrap();
+        assert!(edit.0 < screen.width / 2.0 && pause.0 > screen.width / 2.0);
+        assert!(menu.down(1, pause, screen));
+        assert_eq!(menu.up(1, pause), Some(Choice::Pause));
+
+        let input = menu.hits.find(&Target::Tab(Tab::Input)).unwrap();
+        assert!(menu.down(2, input, screen));
+        assert_eq!(menu.up(2, input), None);
+        menu.draw(&mut batch, &atlas, screen, settings());
+        assert!(menu.hits.find(&Target::Choose(Choice::Keyboard)).is_some());
+        assert!(menu.hits.find(&Target::Choose(Choice::Pause)).is_some());
+        assert_eq!(menu.sliders.len(), 3);
     }
 
     #[test]

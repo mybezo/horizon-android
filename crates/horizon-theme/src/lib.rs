@@ -77,6 +77,7 @@ pub mod icons {
         "reload",
         "search",
         "server",
+        "settings",
         "sliders",
         // Not Pixelarticons': drawn for Horizon's ratings, in the same 2-unit grid.
         "star",

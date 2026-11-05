@@ -8,7 +8,7 @@
 //! leaves.
 use super::widgets::{self, Hits, MUTED, PLATE, TEXT};
 use super::*;
-use crate::ui_theme::{Face, color::hex, mybezo};
+use crate::ui_theme::{Face, color::hex};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Selected {
@@ -92,6 +92,7 @@ enum Action {
     Trigger,
     Duplicate,
     Delete,
+    LayerPage(isize),
     LayerSelect(usize),
     LayerHide(usize),
     LayerShows(usize),
@@ -147,6 +148,7 @@ pub struct Editor {
     picking: Option<PickFor>,
     pick_scroll: f32,
     layers_open: bool,
+    layer_offset: usize,
     typing: Option<Typing>,
     /// Where the dragged widget snapped: vertical lines (x) and horizontal (y).
     guides: Vec<(bool, f32)>,
@@ -344,6 +346,7 @@ impl Editor {
             picking: None,
             pick_scroll: 0.0,
             layers_open: false,
+            layer_offset: 0,
             typing: None,
             guides: Vec::new(),
             dirty: false,
@@ -992,6 +995,9 @@ impl Editor {
                     self.picking = None;
                 } else if self.layers_open {
                     self.layers_open = false;
+                    self.tools_open = true;
+                } else if self.tools_open {
+                    self.tools_open = false;
                 } else {
                     self.properties_open = false;
                 }
@@ -1210,6 +1216,9 @@ impl Editor {
                     return Outcome::HideKeyboard;
                 }
             }
+            Action::LayerPage(delta) => {
+                self.layer_offset = self.layer_offset.saturating_add_signed(delta);
+            }
             Action::LayerSelect(l) => {
                 self.layer = l;
                 self.select(None);
@@ -1258,6 +1267,7 @@ impl Editor {
                     joystick_buttons: Vec::new(),
                 });
                 self.layer = n;
+                self.layer_offset = n;
                 self.rebuild();
             }
         }
@@ -1363,28 +1373,7 @@ impl Editor {
         let (x, y, r) = self.gear(screen);
         super::menu::Menu::gear(ui, x, y, r * 1.3, 1.0);
         if self.tools_open {
-            let panel = Rect {
-                x: (x - 118.0 * d).clamp(0.0, screen.width - 236.0 * d),
-                y: if y < screen.height / 2.0 { y + r } else { y - r - 142.0 * d },
-                w: 236.0 * d,
-                h: 142.0 * d,
-            };
-            widgets::plate(ui, panel, 12.0 * d, PLATE);
-            widgets::text(ui, panel.x + 10.0 * d, panel.y + 6.0 * d, 12.0,
-                Face::SemiBold, TEXT, if self.dirty { "Controller editor · Unsaved" } else { "Controller editor" });
-            for (i, (label, action)) in [
-                ("+ Button", Action::AddButton), ("+ Text", Action::AddText),
-                ("+ Joystick", Action::AddStick), ("Layers", Action::Layers),
-                ("Save layout", Action::Save), ("Exit", Action::Exit),
-            ].into_iter().enumerate() {
-                let primary = action == Action::Save;
-                widgets::button(ui, &mut self.hits, Rect {
-                    x: panel.x + (8.0 + (i % 2) as f32 * 112.0) * d,
-                    y: panel.y + (30.0 + (i / 2) as f32 * 34.0) * d,
-                    w: 108.0 * d,
-                    h: 29.0 * d,
-                }, label, primary, action);
-            }
+            self.tools(ui, screen);
             return;
         }
         let Some(selected) = self.selected else { return };
@@ -1414,26 +1403,74 @@ impl Editor {
         }
     }
 
-    /// The dialog's frame, on the side the selection is not, and its tabs.
+    fn tools(&mut self, ui: &mut Ui, screen: Screen) {
+        let d = ui.density;
+        let split = screen.width >= 540.0 * d;
+        let height = 294.0 * d;
+        let top = (screen.height - height) * 0.5;
+        let panel = Rect {
+            x: if split { 10.0 * d } else { (screen.width - 254.0 * d) * 0.5 },
+            y: top,
+            w: 254.0 * d,
+            h: height,
+        };
+        widgets::plate(ui, panel, 17.0 * d, PLATE);
+        widgets::text(ui, panel.x + 14.0 * d, top + 10.0 * d, 16.0, Face::Medium, TEXT,
+            "Layout Editor");
+        widgets::text(ui, panel.x + 14.0 * d, top + 35.0 * d, 11.0, Face::Regular, MUTED,
+            if self.dirty { "Unsaved changes" } else { "Layout saved" });
+        let actions = [
+            ("Add button", Action::AddButton),
+            ("Add text", Action::AddText),
+            ("Add joystick", Action::AddStick),
+            ("Manage layers", Action::Layers),
+            ("Save layout", Action::Save),
+            ("Exit without saving", Action::Exit),
+            ("Back to layout", Action::Close),
+        ];
+        for (i, (label, action)) in actions.into_iter().enumerate() {
+            let primary = action == Action::Save;
+            widgets::button(ui, &mut self.hits, Rect {
+                x: panel.x + 12.0 * d, y: top + (53.0 + i as f32 * 32.0) * d,
+                w: panel.w - 24.0 * d, h: 28.0 * d,
+            }, label, primary, action);
+        }
+
+        if split {
+            let layers = Rect { x: screen.width - 264.0 * d, ..panel };
+            widgets::plate(ui, layers, 17.0 * d, PLATE);
+            widgets::text(ui, layers.x + 14.0 * d, top + 10.0 * d, 16.0, Face::Medium, TEXT,
+                "Layers");
+            let total = self.controls.layout.layers.len();
+            let start = self.layer.saturating_sub(2).min(total.saturating_sub(6));
+            for (i, layer) in self.controls.layout.layers.iter().enumerate().skip(start).take(6) {
+                let row = Rect {
+                    x: layers.x + 12.0 * d, y: top + (48.0 + (i - start) as f32 * 33.0) * d,
+                    w: 158.0 * d, h: 29.0 * d,
+                };
+                let name = if layer.name.is_empty() { "Layer" } else { &layer.name };
+                widgets::button(ui, &mut self.hits, row, name, i == self.layer, Action::LayerSelect(i));
+                widgets::button(ui, &mut self.hits, Rect { x: row.x + 162.0 * d, w: 68.0 * d, ..row },
+                    if layer.hide { "Hidden" } else { "Shown" }, false, Action::LayerHide(i));
+            }
+            widgets::button(ui, &mut self.hits, Rect {
+                x: layers.x + 12.0 * d, y: top + 253.0 * d, w: 230.0 * d, h: 29.0 * d,
+            }, "Manage layers", false, Action::Layers);
+        }
+    }
+
+    /// The properties dialog opens independently of the selection handles.
     fn frame(&mut self, ui: &mut Ui, screen: Screen, tabs: &[(Tab, &str)]) -> Rect {
         let d = ui.density;
-        let w = (360.0 * d).min(screen.width - 24.0 * d);
-        let selected_right = self.selected.is_none_or(|selected| {
-            let r = self.rect_of(selected, screen);
-            r.x + r.w / 2.0 > screen.width / 2.0
-        });
-        let x = if selected_right {
-            12.0 * d
-        } else {
-            screen.width - w - 12.0 * d
-        };
+        let w = (410.0 * d).min(screen.width - 24.0 * d);
+        let h = (370.0 * d).min(screen.height - 20.0 * d);
         let r = Rect {
-            x,
-            y: 56.0 * d,
+            x: (screen.width - w) * 0.5,
+            y: (screen.height - h) * 0.5,
             w,
-            h: screen.height - 64.0 * d,
+            h,
         };
-        widgets::plate(ui, r, 8.0 * d, PLATE);
+        widgets::plate(ui, r, 17.0 * d, PLATE);
         let title = match self.selected {
             Some(Selected::Button(..)) => "Button properties",
             Some(Selected::Text(..)) => "Text properties",
@@ -1474,7 +1511,7 @@ impl Editor {
                 h: d,
             },
             0.0,
-            mybezo::BORDER,
+            widgets::RAISED,
         );
         r
     }
@@ -2057,11 +2094,14 @@ impl Editor {
                 )
             })
             .collect();
-        let max_rows = ((r.h - 100.0 * d) / (34.0 * d)).max(0.0) as usize;
-        for (n, (name, hidden, shows, count)) in layers.into_iter().enumerate().take(max_rows) {
+        let max_rows = ((r.h - 100.0 * d) / (34.0 * d)).max(1.0) as usize;
+        let end_offset = layers.len().saturating_sub(max_rows);
+        self.layer_offset = self.layer_offset.min(end_offset);
+        let offset = self.layer_offset;
+        for (n, (name, hidden, shows, count)) in layers.into_iter().enumerate().skip(offset).take(max_rows) {
             let row = Rect {
                 x: r.x + 14.0 * d,
-                y: r.y + (50.0 + n as f32 * 34.0) * d,
+                y: r.y + (50.0 + (n - offset) as f32 * 34.0) * d,
                 w: r.w - 28.0 * d,
                 h: 30.0 * d,
             };
@@ -2123,14 +2163,15 @@ impl Editor {
             w: r.w - 28.0 * d,
             h: 28.0 * d,
         };
-        self.buttons(
-            ui,
-            row,
-            vec![
-                ("New layer".into(), true, Action::NewLayer),
-                ("Close".into(), false, Action::Close),
-            ],
-        );
+        let mut actions = vec![("New layer".into(), true, Action::NewLayer)];
+        if offset > 0 {
+            actions.push(("Previous".into(), false, Action::LayerPage(-(max_rows as isize))));
+        }
+        if offset < end_offset {
+            actions.push(("Next".into(), false, Action::LayerPage(max_rows as isize)));
+        }
+        actions.push(("Done".into(), false, Action::Close));
+        self.buttons(ui, row, actions);
     }
 
     fn picker(&mut self, ui: &mut Ui, screen: Screen, target: PickFor) {
