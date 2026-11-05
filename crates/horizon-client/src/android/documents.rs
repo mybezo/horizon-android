@@ -19,6 +19,7 @@ use std::{
 };
 
 struct Request {
+    zalith: bool,
     kind: Kind,
     appearance: Option<crate::skins::library::Kind>,
     home: PathBuf,
@@ -72,7 +73,7 @@ pub fn conflict() -> bool {
         .conflict
         .is_some()
 }
-fn notice(text: impl Into<String>, changed: bool) {
+pub(crate) fn notice(text: impl Into<String>, changed: bool) {
     let text = text.into();
     let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     s.toast = Some((text.clone(), std::time::Instant::now()));
@@ -116,6 +117,7 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
         .ok_or("Could not access the Android import cache")?
         .join("content-imports");
     STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        zalith: false,
         kind,
         appearance: None,
         home,
@@ -126,6 +128,26 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
         return Err("Android document picker is unavailable".into());
     }
     notice(format!("Choose a {} file", kind.label()), false);
+    Ok(())
+}
+pub fn begin_zalith(home: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        zalith: true,
+        kind: Kind::Packs,
+        appearance: None,
+        home,
+        cache: PathBuf::new(),
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice("Choose a ZalithLauncher2 controller JSON", false);
     Ok(())
 }
 pub fn picker_failed(error: &str) {
@@ -145,6 +167,7 @@ pub fn begin_appearance(
         .ok_or("Could not access Android's import cache")?
         .join("appearance-imports");
     STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        zalith: false,
         kind: Kind::Packs,
         appearance: Some(kind),
         home,
@@ -228,6 +251,23 @@ pub extern "system" fn document_result(
     }
 }
 fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()> {
+    if request.zalith {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        input
+            .take(horizon_client::controls::storage::MAX_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        if CANCEL.load(Ordering::Relaxed) {
+            return Err("Import cancelled".into());
+        }
+        horizon_client::controls::storage::import(&request.home, &bytes)?;
+        notice(
+            "Zalith controller imported. Open Touch Controls to edit it.",
+            false,
+        );
+        return Ok(());
+    }
+
     if let Some(kind) = request.appearance {
         use std::io::Read;
         if !name.to_ascii_lowercase().ends_with(".png") {

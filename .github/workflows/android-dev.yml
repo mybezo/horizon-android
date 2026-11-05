@@ -3,7 +3,7 @@ run-name: Android dev · ${{ github.sha }}
 
 on:
   push:
-    branches: [android]
+    branches: ['**']
     paths:
       - 'crates/**'
       - 'Cargo.toml'
@@ -32,8 +32,7 @@ concurrency:
 
 jobs:
   build:
-    # Never expose a signing secret to pull requests or arbitrary dispatch refs.
-    if: github.ref == 'refs/heads/android'
+    # Builds run only on pushes and explicit manual dispatch; no PR trigger.
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     strategy:
@@ -70,7 +69,8 @@ jobs:
           java-version: '25'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
-          gradle-version: '8.14'
+          gradle-version: '8.14.5'
+
       - name: Install Android toolchain
         env:
           ABI: ${{ matrix.abi }}
@@ -80,7 +80,13 @@ jobs:
             sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -n 1)
           fi
           test -x "$sdkmanager"
-          "$sdkmanager" --sdk_root="$ANDROID_HOME" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+          for package in 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'; do
+            for attempt in 1 2 3 4; do
+              if "$sdkmanager" --sdk_root="$ANDROID_HOME" "$package"; then break; fi
+              if [[ "$attempt" -eq 4 ]]; then exit 1; fi
+              sleep "$((attempt * 10))"
+            done
+          done
           rustup show
           case "$ABI" in
             arm64-v8a) target=aarch64-linux-android ;;
@@ -137,6 +143,9 @@ jobs:
                   'Download the APK artifact below. Installs separately from the stable app. '
                   'Existing worlds/accounts are not copied automatically.\n')
           PY
+      - name: Restore Gradle Java for cleanup
+        if: always()
+        run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: horizon-dev-${{ github.run_number }}-${{ matrix.abi }}

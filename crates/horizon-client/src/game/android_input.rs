@@ -128,6 +128,14 @@ impl Game<'_> {
     }
 
     pub(super) fn android_custom_key_held(&self, key: KeyCode) -> bool {
+        if super::zalith::any_held_key(|physical| {
+            self.settings
+                .keys
+                .translate_all(physical)
+                .contains(&Ok(key))
+        }) {
+            return true;
+        }
         self.pad.touch.held_custom_tokens().any(|token| {
             if let Some(mapping) = token.strip_prefix("action:") {
                 horizon_client::keybinds::key_code(horizon_client::keybinds::KeyBinds::default_of(
@@ -144,6 +152,16 @@ impl Game<'_> {
         })
     }
     pub(super) fn android_custom_mouse_held(&self, button: MouseButton) -> bool {
+        if super::zalith::held_mouse(button)
+            || super::zalith::any_held_key(|physical| {
+                self.settings
+                    .keys
+                    .translate_all(physical)
+                    .contains(&Err(button))
+            })
+        {
+            return true;
+        }
         self.pad.touch.held_custom_tokens().any(|token| {
             token.strip_prefix("action:").is_some_and(|mapping| {
                 horizon_client::keybinds::mouse_button(
@@ -218,7 +236,7 @@ impl Game<'_> {
         }
     }
 
-    fn android_custom_mouse(&mut self, button: MouseButton, down: bool) -> Result<()> {
+    pub(super) fn android_custom_mouse(&mut self, button: MouseButton, down: bool) -> Result<()> {
         if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
             return self.play_mouse(button, down);
         }
@@ -245,7 +263,7 @@ impl Game<'_> {
         Ok(())
     }
 
-    fn android_menu_mouse(
+    pub(super) fn android_menu_mouse(
         &mut self,
         events: &dyn super::event_loop::EventLoopCtl,
         id: WindowId,
@@ -493,7 +511,11 @@ impl Game<'_> {
                 result.unwrap_or_else(|e| format!("File export failed: {e}")),
             ));
         }
-        for out in crate::platform::poll() {
+        for out in if super::zalith::poll_editor() {
+            vec![]
+        } else {
+            crate::platform::poll()
+        } {
             let next_sign_line = self.sign_edit.is_some() && matches!(out, Output::Enter);
             let done =
                 matches!(out, Output::Close) || (matches!(out, Output::Enter) && !next_sign_line);

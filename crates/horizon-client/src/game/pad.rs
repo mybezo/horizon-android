@@ -189,6 +189,13 @@ impl Game<'_> {
     /// Once per loop iteration: read the pads and act on button changes.
     pub(super) fn poll_pads(&mut self, event_loop: &dyn EventLoopCtl) {
         #[cfg(target_os = "android")]
+        {
+            if !crate::touch_visible() || !self.focused {
+                super::zalith::release();
+            }
+            self.zalith_events(event_loop);
+        }
+        #[cfg(target_os = "android")]
         if !matches!(self.screen, Screen::Playing | Screen::Options)
             && self.pad.touch.editor.is_some()
         {

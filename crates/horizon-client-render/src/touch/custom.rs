@@ -105,6 +105,9 @@ impl TouchControls {
         self.fit_placement(p)
     }
     pub fn custom_at(&self, point: [f32; 2]) -> Option<usize> {
+        if self.external_layout {
+            return None;
+        }
         (0..self.settings.custom_buttons.len())
             .rev()
             .find(|&i| layout::contains(self.custom_placement(i).rect(self.aspect()), point))

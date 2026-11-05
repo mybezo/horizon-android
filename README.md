@@ -1,3 +1,5 @@
+> **Zalith controls port:** this source keeps the Vasysik Android launcher and adds MocLG's controller layout system. See [installation, import and validation](docs/zalith-controls.md).
+
 # Horizon Android
 
 A native Android port of [Horizon](https://github.com/ludovic111/horizon), the

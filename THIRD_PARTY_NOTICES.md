@@ -84,3 +84,12 @@ copyright 2026 d3grando, MIT. Exact revisions and adaptation notes are recorded 
 module retains its full MIT LICENSE. Changes provide static Android hook
 adapters, opt-in configuration, profile-state reset and compatibility guards.
 These are a fixed compiled set, not support for loading arbitrary native mods.
+
+
+## Zalith Launcher 2
+
+`crates/horizon-client/src/controls/default_layout.json` is the default control layout of
+[Zalith Launcher 2](https://github.com/ZalithLauncher/ZalithLauncher2) by MovTery and
+contributors (its `default_layout.json`, with its own name and author changed), licensed under
+the GNU General Public License 3.0. Horizon reads and writes its layout format so that layouts
+move between the two; none of Zalith's code is in Horizon.

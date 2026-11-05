@@ -14,11 +14,11 @@ import zipfile
 from check_public_tree import prohibited
 
 ROOT = Path(__file__).resolve().parents[1]
-DIRECTORIES = {'.githooks', '.github', 'benchmarks', 'crates', 'docs', 'launcher',
+DIRECTORIES = {'.claude', 'bench', 'roadmap', '.githooks', '.github', 'benchmarks', 'crates', 'docs', 'launcher',
                'mods', 'packaging', 'packs', 'tests', 'third_party', 'tools', 'website', 'xtask'}
 FILES = {'.dockerignore', '.gitattributes', '.gitignore', 'AGENTS.md', 'CLAUDE.md',
          'Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'CONTRIBUTING.md', 'CONTRIBUTING_ANDROID.md', 'LICENSE', 'README.md',
-         'research-lock.json', 'THIRD_PARTY_NOTICES.md'}
+         'research-lock.json', 'native-hooks.json', 'ROADMAP.md', 'THIRD_PARTY_NOTICES.md'}
 SKIP = {'.git', '.local', 'target', 'build', 'dist', 'logs', 'node_modules',
         '__pycache__', '.gradle', '.venv', '.horizon-cache'}
 SECRET = re.compile(rb'(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}|'
@@ -55,6 +55,7 @@ def export(root, output):
     entries = []
     payload = []
     inactive = []
+    executable_paths = set()
     for relative, path in candidates(root):
         data = path.read_bytes()
         if len(data) > 10 * 1024 * 1024:
@@ -65,6 +66,8 @@ def export(root, output):
         if relative.startswith('.github/workflows/'):
             destination = '.github/upstream-workflows/' + path.name + '.disabled'
             inactive.append(relative)
+        if path.stat().st_mode & 0o111:
+            executable_paths.add(destination)
         payload.append((destination, data))
         entries.append({'path': destination, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
     required = {'LICENSE', 'THIRD_PARTY_NOTICES.md', 'Cargo.toml', 'README.md'}
@@ -80,8 +83,12 @@ def export(root, output):
     provenance = root / 'docs/android-upstream.json'
     revisions = json.loads(provenance.read_text(encoding='utf-8')) if provenance.is_file() else {}
     base = revisions.get('merged_upstream_commit') or revisions.get('base_commit')
-    manifest = {'format': 1, 'upstream': 'https://github.com/ludovic111/horizon',
-                'upstream_revision': base, 'history': 'Preserved upstream history' if base else 'Source snapshot',
+    port_file = root / 'docs/zalith-controls.json'
+    port = json.loads(port_file.read_text()) if port_file.is_file() else {}
+    base = port.get('base_commit', base)
+    manifest = {'format': 1, 'upstream': port.get('base_repository', 'https://github.com/ludovic111/horizon'),
+                'controls_port': port,
+                'upstream_revision': base, 'history': 'Source snapshot; Git history remains in the working repository',
                 'inactive_upstream_workflows': inactive, 'files': entries}
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix('.partial')
@@ -90,7 +97,7 @@ def export(root, output):
             info = zipfile.ZipInfo(name, date_time=(2026, 10, 24, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             # Preserve executable scripts/hooks on Unix checkouts.
-            executable = name.startswith('.githooks/') or name.endswith('.sh')
+            executable = name in executable_paths or name.startswith('.githooks/') or name.endswith('.sh')
             info.external_attr = (0o100755 if executable else 0o100644) << 16
             archive.writestr(info, data)
         archive.writestr('SOURCE-MANIFEST.json', json.dumps(manifest, indent=2) + '\n')

@@ -308,7 +308,7 @@ impl Game<'_> {
                 #[cfg(target_os = "android")]
                 Event::TouchControls => {
                     self.android_release_touch_keys(true);
-                    self.pad.touch.open_editor();
+                    super::zalith::open_editor();
                     self.dragging = false;
                 }
                 Event::ButtonClick => self.audio.play_button_click(),

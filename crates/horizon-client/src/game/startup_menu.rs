@@ -551,9 +551,7 @@ impl Loading {
             match event {
                 #[cfg(target_os = "android")]
                 Event::TouchControls => {
-                    let size = self.menu_size();
-                    self.menu.controls.viewport(size[0], size[1]);
-                    self.menu.controls.open_editor();
+                    super::zalith::open_editor();
                 }
                 Event::Changed => {
                     self.save_menu_settings();
@@ -761,7 +759,11 @@ impl Loading {
             }
             log::info!("{}", notice.text);
         }
-        for out in crate::platform::poll() {
+        for out in if super::zalith::poll_editor() {
+            vec![]
+        } else {
+            crate::platform::poll()
+        } {
             match out {
                 Output::Text(s) => {
                     if self.menu.options_open {
@@ -1125,6 +1127,31 @@ impl Loading {
         event_loop: &dyn EventLoopCtl,
         event: WindowEvent,
     ) -> Result<()> {
+        #[cfg(target_os = "android")]
+        if super::zalith::editing() {
+            if matches!(&event, WindowEvent::KeyboardInput {event,..}
+                if event.state == ElementState::Pressed &&
+                (event.physical_key == PhysicalKey::Code(KeyCode::Escape) || event.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::BrowserBack)))
+            {
+                super::zalith::back();
+                return Ok(());
+            }
+            if let WindowEvent::KeyboardInput { event: key, .. } = &event
+                && super::zalith::editor_key(key)
+            {
+                return Ok(());
+            }
+            if let WindowEvent::Touch(touch) = &event {
+                let size = self.menu_size();
+                let density = self
+                    .window
+                    .as_ref()
+                    .map_or(1.0, |w| super::zalith::density(w));
+                super::zalith::touch(touch, size, density, false);
+                return Ok(());
+            }
+        }
+
         #[cfg(target_os = "android")]
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && event.state == ElementState::Pressed
@@ -1702,6 +1729,14 @@ impl Loading {
         self.menu
             .frame_graph
             .draw(self.settings.horizon.overlay, batch, &gui.atlas);
+        #[cfg(target_os = "android")]
+        if super::zalith::editing() {
+            let density = self
+                .window
+                .as_ref()
+                .map_or(1.0, |w| super::zalith::density(w));
+            super::zalith::draw(batch, &gui.atlas, density, false, &self.settings);
+        }
         #[cfg(target_os = "android")]
         crate::documents::draw(batch, &gui.atlas);
     }

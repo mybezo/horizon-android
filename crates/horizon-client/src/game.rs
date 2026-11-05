@@ -203,6 +203,8 @@ mod native_explosions;
 mod native_falling;
 mod native_hooks;
 #[cfg(target_os = "android")]
+mod zalith;
+#[cfg(target_os = "android")]
 use android_bundled::{
     official_minimap, official_recipes, official_recipes_glue, official_zoom, smartf3,
 };
@@ -14920,6 +14922,7 @@ impl Game<'_> {
         let mut hud = horizon_client::spans::time("hud", || self.hud(size));
         #[cfg(target_os = "android")]
         {
+            self.pad.touch.external_layout = true;
             self.pad.touch.auxiliary_only =
                 self.settings.keypad.enabled && self.pad.touch.editor.is_none();
         }
@@ -14940,13 +14943,25 @@ impl Game<'_> {
         }
         #[cfg(target_os = "android")]
         {
-            if (crate::touch_visible() || self.settings.keypad.enabled)
+            if !self.pad.touch.external_layout
+                && (crate::touch_visible() || self.settings.keypad.enabled)
                 && self.pad.touch.editor.is_none()
             {
                 self.pad
                     .touch_ui
                     .draw(&mut hud, &self.gui.atlas, self.pad_in_menu());
             }
+        }
+        #[cfg(target_os = "android")]
+        if crate::touch_visible() || zalith::editing() {
+            let density = self.window.as_ref().map_or(1.0, |w| zalith::density(w));
+            zalith::draw(
+                &mut hud,
+                &self.gui.atlas,
+                density,
+                !self.pad_in_menu(),
+                &self.settings,
+            );
         }
         self.flush_ime(&mut hud);
         let title = self.shows_panorama();
@@ -16088,6 +16103,51 @@ impl Game<'_> {
             return;
         }
         #[cfg(target_os = "android")]
+        {
+            self.pad.touch.external_layout = true;
+            if matches!(&event, WindowEvent::Focused(false)) {
+                zalith::release();
+                self.zalith_events(event_loop);
+            }
+            if let WindowEvent::KeyboardInput { event: key, .. } = &event
+                && key.state == ElementState::Pressed
+                && (key.logical_key
+                    == winit::keyboard::Key::Named(winit::keyboard::NamedKey::BrowserBack)
+                    || key.physical_key == PhysicalKey::Code(KeyCode::Escape))
+                && zalith::back()
+            {
+                self.zalith_events(event_loop);
+                return;
+            }
+            if let WindowEvent::KeyboardInput { event: key, .. } = &event
+                && zalith::editor_key(key)
+            {
+                return;
+            }
+            if matches!(&event, WindowEvent::Touch(_)) {
+                crate::touch_input(true);
+            }
+            if let WindowEvent::Touch(touch) = &event
+                && (crate::touch_visible() || zalith::editing())
+            {
+                self.last_input = Instant::now();
+                self.pad.menu.keyboard_focus = false;
+                let window = self.window.as_ref().unwrap();
+                let size = window.inner_size();
+                let density = zalith::density(window);
+                let taken = zalith::touch(
+                    touch,
+                    [size.width, size.height],
+                    density,
+                    !self.pad_in_menu(),
+                );
+                self.zalith_events(event_loop);
+                if taken {
+                    return;
+                }
+            }
+        }
+        #[cfg(target_os = "android")]
         if let WindowEvent::KeyboardInput { event, .. } = &mut event
             && !matches!(event.physical_key, PhysicalKey::Code(_))
             && let Some(code) =
@@ -16249,7 +16309,11 @@ impl Game<'_> {
                 }
                 return;
             }
-            match self.android_aux_touch(touch, event_loop, id) {
+            match if self.pad.touch.external_layout {
+                Ok(false)
+            } else {
+                self.android_aux_touch(touch, event_loop, id)
+            } {
                 Ok(true) => return,
                 Ok(false) => {}
                 Err(error) => {

@@ -1,0 +1,12 @@
+{
+  "base_repository": "https://github.com/Vasysik/horizon-android",
+  "base_branch": "android",
+  "base_commit": "150a414b09a18c900489d9462a7fc035dae744b7",
+  "controls_repository": "https://github.com/MocLG/horizon-android",
+  "controls_commit": "a69321a00de03daa5ab3a42397ceea83895d6733",
+  "scope": "Controls, layout editor and direct Zalith JSON import only; original launcher and account code retained",
+  "active_layout": "<profile-game-home>/controls/zalith.json",
+  "display_preferences": "<profile-game-home>/controls/display.json",
+  "native_entry": "horizon-android",
+  "previous_moclg_launcher_integration": false
+}

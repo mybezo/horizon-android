@@ -122,6 +122,8 @@ enum Role {
 }
 #[derive(Default)]
 pub struct TouchControls {
+    /// An external layout owns buttons; keep native world gestures only.
+    pub external_layout: bool,
     pub settings: Settings,
     pub force_crosshair: bool,
     pub projectile_crosshair: bool,
@@ -257,6 +259,9 @@ impl TouchControls {
         self.pending.set(button, true);
     }
     fn visible(&self, c: Control) -> bool {
+        if self.external_layout {
+            return false;
+        }
         if c == Control::Shield && !self.shield_available && self.editor.is_none() {
             return false;
         }
@@ -346,6 +351,9 @@ impl TouchControls {
         })
     }
     pub fn draw(&self, b: &mut HudBatch, a: &HudAtlas) {
+        if self.external_layout {
+            return;
+        }
         let (w, h) = (b.width, b.height);
         if self.editor.is_some() {
             self.draw_editor_toolbar(b, a);

@@ -93,6 +93,7 @@ fn resolve(home: &Path, id: &str) -> io::Result<Document> {
             Some("packs") => ("resourcepacks", "Resource Packs"),
             Some("shaders") => ("shaderpacks", "Shader Packs"),
             Some("worlds") => ("saves", "Worlds"),
+            Some("controls") => ("controls", "Zalith Controls"),
             Some("configuration") => ("", "Configuration"),
             _ => return Err(invalid()),
         };
@@ -200,6 +201,7 @@ pub fn children(home: &Path, id: &str) -> io::Result<Vec<Value>> {
             "shaders",
             "worlds",
             "configuration",
+            "controls",
             "reports",
         ]
         .iter()
@@ -398,8 +400,12 @@ mod tests {
         ));
         fs::create_dir_all(&home).unwrap();
         let roots = children(&home, ROOT).unwrap();
-        assert_eq!(roots.len(), 6);
+        assert_eq!(roots.len(), 7);
         assert_eq!(roots[0]["document_id"], "p0/mods");
+        assert!(roots.iter().any(|r| r["document_id"] == "p0/controls"));
+        call(&home, "create", "p0/controls", "zalith.json").unwrap();
+        assert!(open(&home, "p0/controls/zalith.json", "r").is_ok());
+        assert!(resolve(&home, "p0/controls/../account.json").is_err());
         for id in [
             "../tokens",
             "p0/mods/../account.json",
