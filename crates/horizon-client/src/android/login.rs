@@ -1,7 +1,7 @@
 //! Native account panel; authentication is shared with the desktop launcher.
 use super::pages::{Action, button};
 use crate::account::{self, Account, Accounts, Secrets, SignIn, SignInState};
-use horizon_client::ui_theme::{Face, Ui, color};
+use horizon_client::ui_theme::{Face, Ui, color, mybezo};
 
 pub(super) struct Login {
     pub choosing: bool,
@@ -233,7 +233,11 @@ impl Login {
         let h = (ui.h - 24.0).min(550.0);
         let x = (ui.w - w) / 2.0;
         let y = (ui.h - h) / 2.0;
-        ui.rounded(x, y, w, h, 8.0, color::BG);
+        ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, color::hex(0x000000, 150));
+        ui.rounded(x - 3.0, y - 3.0, w + 6.0, h + 6.0, 25.0, color::hex(0xdab5ff, 20));
+        ui.rounded(x, y + 6.0, w, h, 22.0, color::hex(0x000000, 96));
+        ui.rounded(x, y, w, h, 22.0, mybezo::PANEL);
+        ui.border(x, y, w, h, 22.0, color::hex(0x47345f, 255));
         if self.providers {
             ui.text(
                 Face::Medium,

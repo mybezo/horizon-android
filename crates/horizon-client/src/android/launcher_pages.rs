@@ -90,6 +90,27 @@ pub(super) enum Action {
 
 pub(super) const BACKGROUND_SPRITE: &str = "mybezo/launcher-background";
 
+/// The launcher's layered look: glass surfaces over the art, sunk wells for
+/// fields, a glowing two-tone pill for the one big action.
+pub(super) mod style {
+    use horizon_client::ui_theme::color::hex;
+    /// Cards and secondary buttons.
+    pub const SURFACE: u32 = hex(0x1b1428, 226);
+    pub const SURFACE_HI: u32 = hex(0x2a1f3b, 242);
+    /// Fields and switch tracks.
+    pub const WELL: u32 = hex(0x0c0811, 224);
+    pub const LINE: u32 = hex(0x47345f, 255);
+    pub const LINE_SOFT: u32 = hex(0x47345f, 150);
+    pub const SHADOW: u32 = hex(0x000000, 96);
+    pub const SHEEN: u32 = hex(0xffffff, 26);
+    pub const SHEEN_STRONG: u32 = hex(0xffffff, 54);
+    pub const GLOW: u32 = hex(0xdab5ff, 46);
+    pub const GLOW_SOFT: u32 = hex(0xdab5ff, 20);
+    pub const TEXT_SOFT: u32 = hex(0xbcb1cf, 255);
+    pub const SUCCESS: u32 = hex(0x45c27a, 255);
+    pub const DANGER: u32 = hex(0xf07a68, 255);
+}
+
 fn draw_play_background(ui: &mut Ui, w: f32, h: f32) {
     let Some(mut source) = ui.atlas.sprites.get(BACKGROUND_SPRITE).copied() else {
         return;
@@ -110,11 +131,11 @@ fn draw_play_background(ui: &mut Ui, w: f32, h: f32) {
     ui.batch
         .rect_uv(0.0, 0.0, w * scale, h * scale, source, u32::MAX);
 
-    // Keep contrast behind the left-hand text and under the launcher tabs.
-    let left = (w * 0.62).max(220.0).min(w);
+    // Keep contrast behind the left-hand card and fade the art into the page.
+    let left = (w * 0.66).max(240.0).min(w);
     for i in 0..40 {
         let x = left * i as f32 / 40.0;
-        let alpha = 231u8.saturating_sub(i * 5);
+        let alpha = 220u8.saturating_sub(i * 5);
         ui.rounded(
             x,
             0.0,
@@ -124,9 +145,154 @@ fn draw_play_background(ui: &mut Ui, w: f32, h: f32) {
             color::hex(0x100817, alpha),
         );
     }
-    ui.rounded(0.0, 0.0, w, 134.0, 0.0, color::hex(0x110a19, 195));
-    ui.rounded(0.0, 132.0, w * 0.52, 2.0, 0.0, mybezo::ACCENT);
-    ui.rounded(w * 0.52, 132.0, w * 0.48, 2.0, 0.0, mybezo::WARM);
+    // A soft vignette at the top (under the header) and the bottom (under the footer).
+    for i in 0..16u8 {
+        let step = i as f32;
+        let alpha = 200u8.saturating_sub(i * 12);
+        ui.rounded(0.0, step * 9.0, w, 9.0, 0.0, color::hex(0x0e0915, alpha));
+        ui.rounded(0.0, h - (step + 1.0) * 7.0, w, 7.0, 0.0, color::hex(0x0e0915, alpha));
+    }
+}
+
+/// The pages without art: a violet haze behind the header fading into the page.
+fn draw_backdrop(ui: &mut Ui, w: f32, h: f32) {
+    for i in 0..24u8 {
+        let step = i as f32;
+        let alpha = 70u8.saturating_sub(i * 3);
+        ui.rounded(0.0, step * 8.0, w, 8.0, 0.0, color::hex(0x2c1846, alpha));
+    }
+    for i in 0..12u8 {
+        let step = i as f32;
+        let alpha = 26u8.saturating_sub(i * 2);
+        ui.rounded(0.0, h - (step + 1.0) * 10.0, w, 10.0, 0.0, color::hex(0x3a1530, alpha));
+    }
+}
+
+/// A glass card: shadow, translucent plate, hairline border and a top sheen.
+pub(super) fn card(ui: &mut Ui, x: f32, y: f32, w: f32, h: f32, radius: f32) {
+    ui.rounded(x, y + 4.0, w, h, radius, style::SHADOW);
+    ui.rounded(x, y, w, h, radius, style::SURFACE);
+    ui.border(x, y, w, h, radius, style::LINE_SOFT);
+    ui.rounded(x + radius, y + 1.0, (w - 2.0 * radius).max(0.0), 1.0, 0.0, style::SHEEN);
+}
+
+/// A small rounded label; returns its width.
+pub(super) fn chip(ui: &mut Ui, x: f32, y: f32, text: &str, fg: u32, bg: u32) -> f32 {
+    let size: f32 = 11.5;
+    let width = ui.measure(Face::Medium, size, text) + 20.0;
+    ui.rounded(x, y, width, 22.0, 11.0, bg);
+    ui.text(
+        Face::Medium,
+        size,
+        x + 10.0,
+        y + (22.0 - (size * 1.45f32).round()) * 0.5,
+        fg,
+        text,
+    );
+    width
+}
+
+/// The icon a button shows beside its label.
+fn action_icon(action: Action) -> Option<&'static str> {
+    Some(match action {
+        Action::Play => "play",
+        Action::Search => "search",
+        Action::OpenFolder(_) | Action::GameFiles | Action::WorldFiles => "folder",
+        Action::Import(_) | Action::WardrobeImport => "plus",
+        Action::Install(_) | Action::WardrobeCloud => "download",
+        Action::DeleteLocal(_) | Action::ConfirmDeleteLocal => "trash",
+        Action::Repository | Action::LoginLink | Action::ReviewApp => "external-link",
+        Action::Logs | Action::ExportDiagnostics => "bug",
+        Action::ExportPerformance => "terminal",
+        Action::Account
+        | Action::SignIn
+        | Action::MicrosoftAccount
+        | Action::OfflineAccount
+        | Action::SavedAccounts
+        | Action::DeviceSignIn => "user",
+        Action::Previous => "arrow-left",
+        Action::Next => "chevron-right",
+        Action::Dismiss | Action::CancelLogin | Action::CloseLogin => "close",
+        Action::ConfirmMinimize => "check",
+        Action::ToggleBundled(_) => "zap",
+        Action::SignOut => "arrow-left",
+        Action::WardrobeUpload => "reload",
+        _ => return None,
+    })
+}
+
+fn page_icon(page: Page) -> &'static str {
+    match page {
+        Page::Play => "home",
+        Page::Mods => "package",
+        Page::Packs => "image",
+        Page::Shaders => "zap",
+        Page::Installed => "archive",
+        Page::Settings => "sliders",
+        Page::Skins => "user",
+    }
+}
+
+/// The icon in front of a launch setting.
+fn setting_icon(action: Action) -> &'static str {
+    match action {
+        Action::Renderer | Action::GpuProfile => "monitor",
+        Action::RenderScale | Action::Aspect => "image",
+        Action::WorkerLimit | Action::CacheBudget | Action::PerformanceHints => "zap",
+        Action::GameFiles | Action::WorldFiles => "folder",
+        Action::Profile => "user",
+        Action::Orientation | Action::Immersive | Action::Cutout => "monitor",
+        Action::InputHost => "gamepad",
+        Action::DisplayHz | Action::RecordPerformance => "clock",
+        Action::ExportDiagnostics => "bug",
+        Action::ExportPerformance => "terminal",
+        Action::Field(_) => "server",
+        _ => "sliders",
+    }
+}
+
+/// One tab of the navigation bar: a glowing pill when open, icon and label otherwise.
+fn tab(ui: &mut Ui, rect: [f32; 4], label: &str, page: Page, active: bool) {
+    let [x, y, w, h] = rect;
+    let radius = (h * 0.5).min(16.0);
+    if active {
+        ui.rounded(x - 2.0, y - 2.0, w + 4.0, h + 4.0, radius + 2.0, style::GLOW);
+        ui.rounded(x, y, w, h, radius, mybezo::WARM);
+        ui.rounded(x, y, w, h - 2.0, radius, mybezo::ACCENT);
+        ui.rounded(
+            x + 4.0,
+            y + 2.0,
+            w - 8.0,
+            h * 0.4,
+            (radius - 3.0).max(0.0),
+            style::SHEEN_STRONG,
+        );
+    }
+    let fg = if active { mybezo::INK } else { style::TEXT_SOFT };
+    let icon = page_icon(page);
+    if w < 100.0 {
+        let size: f32 = 16.0;
+        ui.icon(icon, x + (w - size) * 0.5, y + 5.0, size, fg);
+        let font: f32 = 9.5;
+        let text = ui.fit_text(Face::Medium, font, label, w - 6.0);
+        let width = ui.measure(Face::Medium, font, &text);
+        ui.text(Face::Medium, font, x + (w - width) * 0.5, y + h - 17.0, fg, &text);
+    } else {
+        let size: f32 = 18.0;
+        let font: f32 = 14.0;
+        let text = ui.fit_text(Face::Medium, font, label, w - size - 28.0);
+        let width = ui.measure(Face::Medium, font, &text);
+        let left = x + (w - size - 8.0 - width) * 0.5;
+        ui.icon(icon, left, y + (h - size) * 0.5, size, fg);
+        ui.text(
+            Face::Medium,
+            font,
+            left + size + 8.0,
+            y + (h - (font * 1.45f32).round()) * 0.5,
+            fg,
+            &text,
+        );
+    }
 }
 
 pub(super) fn button(
@@ -138,37 +304,147 @@ pub(super) fn button(
     accent: bool,
 ) {
     let [x, y, w, h] = rect;
-    ui.rounded(
-        x,
-        y,
-        w,
-        h,
-        6.0,
-        if accent {
-            mybezo::ACCENT
-        } else {
-            mybezo::RAISED
-        },
-    );
-    let padding = (w * 0.12).clamp(4.0, 12.0);
-    let base = if w < 80.0 { 13.0 } else { 16.0 };
-    let font = if matches!(action, Action::Page(_)) {
-        (base * ((w - 2.0 * padding) / ui.measure(Face::Medium, base, label).max(1.0)).min(1.0))
-            .max(9.0)
-    } else {
-        base
+    if let Action::Page(page) = action {
+        tab(ui, rect, label, page, accent);
+        targets.push((rect, action));
+        return;
+    }
+    let field = matches!(action, Action::Field(_));
+    // Launch settings mark their dropdowns with a trailing " v": draw a chevron instead.
+    let (label, dropdown) = match label.strip_suffix(" v") {
+        Some(rest) => (rest, true),
+        None => (label.trim_end(), false),
     };
-    let label = ui.fit_text(Face::Medium, font, label, w - 2.0 * padding);
+    // Section headers start with "+ " (closed) or "- " (open).
+    let (label, section) = if matches!(action, Action::ToggleSection(_)) {
+        if let Some(rest) = label.strip_prefix("- ") {
+            (rest, Some(true))
+        } else if let Some(rest) = label.strip_prefix("+ ") {
+            (rest, Some(false))
+        } else {
+            (label, None)
+        }
+    } else {
+        (label, None)
+    };
+    let radius = (h * 0.5).min(18.0);
+
+    ui.rounded(x, y + 3.0, w, h, radius, style::SHADOW);
+    if accent {
+        ui.rounded(x - 4.0, y - 3.0, w + 8.0, h + 8.0, radius + 4.0, style::GLOW_SOFT);
+        ui.rounded(x - 2.0, y - 1.0, w + 4.0, h + 4.0, radius + 2.0, style::GLOW);
+        ui.rounded(x, y, w, h, radius, mybezo::WARM);
+        ui.rounded(x, y, w, h - 3.0, radius, mybezo::ACCENT);
+        ui.rounded(
+            x + 4.0,
+            y + 2.0,
+            w - 8.0,
+            (h * 0.42).max(1.0),
+            (radius - 3.0).max(0.0),
+            style::SHEEN_STRONG,
+        );
+    } else if field {
+        ui.rounded(x, y, w, h, radius, style::WELL);
+        ui.border(x, y, w, h, radius, style::LINE);
+    } else {
+        ui.rounded(x, y, w, h, radius, style::SURFACE_HI);
+        ui.border(x, y, w, h, radius, style::LINE);
+        ui.rounded(
+            x + radius,
+            y + 1.0,
+            (w - 2.0 * radius).max(0.0),
+            1.0,
+            0.0,
+            style::SHEEN,
+        );
+    }
+
+    let fg = if accent {
+        mybezo::INK
+    } else if field {
+        style::TEXT_SOFT
+    } else {
+        color::TEXT
+    };
+    let icon = match section {
+        Some(true) => Some("chevron-down"),
+        Some(false) => Some("chevron-right"),
+        None => action_icon(action),
+    };
+    let icon_size = (h * 0.42).clamp(12.0, 20.0);
+    if field {
+        // The caret is placed at x + 12 + the Medium 16 width of the fitted text.
+        let text = ui.fit_text(Face::Medium, 16.0, label, w - 24.0);
+        let width = ui.measure(Face::Medium, 16.0, &text);
+        ui.text(
+            Face::Medium,
+            16.0,
+            x + 12.0,
+            y + ((h - 23.0) * 0.5).max(0.0),
+            fg,
+            &text,
+        );
+        if width + icon_size + 36.0 < w {
+            ui.icon(
+                "search",
+                x + w - 14.0 - icon_size,
+                y + (h - icon_size) * 0.5,
+                icon_size,
+                style::TEXT_SOFT,
+            );
+        }
+        targets.push((rect, action));
+        return;
+    }
+    let font: f32 = if w < 80.0 {
+        13.0
+    } else if h >= 52.0 {
+        18.0
+    } else {
+        15.0
+    };
+    let padding = (w * 0.1).clamp(6.0, 16.0);
+    let show_icon = icon.is_some() && w >= 72.0;
+    let mut room = w - 2.0 * padding;
+    if show_icon {
+        room -= icon_size + 8.0;
+    }
+    if dropdown {
+        room -= 24.0;
+    }
+    let text = ui.fit_text(Face::Medium, font, label, room.max(8.0));
+    let width = ui.measure(Face::Medium, font, &text);
+    let content = width + if show_icon { icon_size + 8.0 } else { 0.0 };
+    let mut left = if dropdown || section.is_some() {
+        x + padding
+    } else {
+        x + ((w - content) * 0.5).max(padding.min(w * 0.5))
+    };
+    if show_icon && let Some(name) = icon {
+        ui.icon(name, left, y + (h - icon_size) * 0.5, icon_size, fg);
+        left += icon_size + 8.0;
+    }
     ui.text(
         Face::Medium,
         font,
-        x + padding,
-        y + 11.0,
-        if accent { mybezo::INK } else { color::TEXT },
-        &label,
+        left,
+        y + ((h - (font * 1.45f32).round()) * 0.5).max(0.0),
+        fg,
+        &text,
     );
+    if dropdown {
+        ui.icon(
+            "chevron-down",
+            x + w - padding - 16.0,
+            y + (h - 16.0) * 0.5,
+            16.0,
+            style::TEXT_SOFT,
+        );
+    }
     targets.push((rect, action));
 }
+
+/// A switch: an accent track with a lit knob when on, a sunk well when off.
 fn toggle(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
@@ -178,31 +454,119 @@ fn toggle(
 ) {
     let [x, y, w, h] = rect;
     ui.text(
-        Face::Regular,
+        Face::Medium,
         14.0,
         x,
-        y + 11.0,
-        color::TEXT,
+        y + (h - 20.0) * 0.5,
+        if on { color::TEXT } else { style::TEXT_SOFT },
         if on { "On" } else { "Off" },
     );
+    let (tw, th): (f32, f32) = (54.0, 30.0);
+    let tx = x + w - tw - 2.0;
+    let ty = y + (h - th) * 0.5;
+    if on {
+        ui.rounded(tx - 2.0, ty - 2.0, tw + 4.0, th + 4.0, th * 0.5 + 2.0, style::GLOW);
+        ui.rounded(tx, ty, tw, th, th * 0.5, mybezo::ACCENT);
+    } else {
+        ui.rounded(tx, ty, tw, th, th * 0.5, style::WELL);
+        ui.border(tx, ty, tw, th, th * 0.5, style::LINE);
+    }
+    let knob = th - 6.0;
+    let kx = if on { tx + tw - knob - 3.0 } else { tx + 3.0 };
+    ui.rounded(kx, ty + 5.0, knob, knob, knob * 0.5, style::SHADOW);
     ui.rounded(
-        x + w - 52.0,
-        y + 8.0,
-        48.0,
-        24.0,
-        12.0,
-        if on { color::TEXT } else { color::HOVER },
-    );
-    ui.rounded(
-        x + w - if on { 26.0 } else { 50.0 },
-        y + 10.0,
-        20.0,
-        20.0,
-        10.0,
-        if on { color::BG } else { color::TEXT },
+        kx,
+        ty + 3.0,
+        knob,
+        knob,
+        knob * 0.5,
+        if on { color::hex(0xffffff, 255) } else { style::TEXT_SOFT },
     );
     targets.push(([x, y, w, h], action));
 }
+
+/// The account button in the header: an avatar with the name's initial and a status dot.
+fn account_chip(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    status: &str,
+    signed_in: bool,
+) {
+    let [x, y, w, h] = rect;
+    let radius = h * 0.5;
+    ui.rounded(x, y + 3.0, w, h, radius, style::SHADOW);
+    ui.rounded(x, y, w, h, radius, style::SURFACE_HI);
+    ui.border(
+        x,
+        y,
+        w,
+        h,
+        radius,
+        if signed_in { mybezo::ACCENT } else { style::LINE },
+    );
+    let avatar = h - 8.0;
+    ui.rounded(
+        x + 4.0,
+        y + 4.0,
+        avatar,
+        avatar,
+        avatar * 0.5,
+        if signed_in { mybezo::ACCENT } else { style::LINE },
+    );
+    let name = status.rsplit(": ").next().unwrap_or(status).trim();
+    let initial: String = name
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .map_or_else(|| "?".into(), |c| c.to_uppercase().collect());
+    let size = (avatar * 0.5).max(10.0);
+    let iw = ui.measure(Face::SemiBold, size, &initial);
+    ui.text(
+        Face::SemiBold,
+        size,
+        x + 4.0 + (avatar - iw) * 0.5,
+        y + 4.0 + (avatar - (size * 1.45f32).round()) * 0.5,
+        if signed_in { mybezo::INK } else { color::TEXT },
+        &initial,
+    );
+    // Status dot on the avatar.
+    ui.rounded(
+        x + avatar - 4.0,
+        y + avatar - 4.0,
+        10.0,
+        10.0,
+        5.0,
+        style::SURFACE_HI,
+    );
+    ui.rounded(
+        x + avatar - 2.0,
+        y + avatar - 2.0,
+        6.0,
+        6.0,
+        3.0,
+        if signed_in { style::SUCCESS } else { mybezo::WARM },
+    );
+    let font: f32 = if h >= 40.0 { 14.0 } else { 13.0 };
+    let left = x + avatar + 14.0;
+    let text = ui.fit_text(Face::Medium, font, status, (x + w - 30.0 - left).max(8.0));
+    ui.text(
+        Face::Medium,
+        font,
+        left,
+        y + (h - (font * 1.45f32).round()) * 0.5,
+        color::TEXT,
+        &text,
+    );
+    ui.icon(
+        "chevron-down",
+        x + w - 26.0,
+        y + (h - 14.0) * 0.5,
+        14.0,
+        style::TEXT_SOFT,
+    );
+    targets.push((rect, Action::Account));
+}
+
 impl Launcher {
     /// The same spatial focus algorithm as the game's controller menus.
     pub(super) fn navigate(&mut self, key: &KeyEvent) -> bool {
@@ -294,34 +658,57 @@ impl Launcher {
         ui.rounded(0.0, 0.0, w, h, 0.0, mybezo::BACKGROUND);
         if self.catalog.page == Page::Play {
             draw_play_background(&mut ui, w, h);
+        } else {
+            draw_backdrop(&mut ui, w, h);
         }
-        ui.rounded(20.0, 13.0, 28.0, 28.0, 5.0, mybezo::ACCENT);
-        ui.text(Face::SemiBold, 19.0, 26.0, 15.0, mybezo::INK, "M");
-        ui.text(Face::SemiBold, 22.0, 58.0, 11.0, color::TEXT, "Horizon");
+        // Logo badge: a glowing two-tone tile with the monogram.
+        ui.rounded(16.0, 10.0, 36.0, 36.0, 12.0, style::GLOW);
+        ui.rounded(19.0, 13.0, 30.0, 30.0, 9.0, mybezo::WARM);
+        ui.rounded(19.0, 13.0, 30.0, 27.0, 9.0, mybezo::ACCENT);
+        ui.rounded(22.0, 15.0, 24.0, 10.0, 5.0, style::SHEEN_STRONG);
+        let monogram = ui.measure(Face::SemiBold, 18.0, "M");
         ui.text(
-            Face::Medium,
-            10.0,
-            59.0,
-            36.0,
-            mybezo::ACCENT,
-            "MYBEZO EDITION",
+            Face::SemiBold,
+            18.0,
+            19.0 + (30.0 - monogram) * 0.5,
+            14.0,
+            mybezo::INK,
+            "M",
         );
-        button(
+        ui.text(Face::SemiBold, 22.0, 60.0, 7.0, color::TEXT, "Horizon");
+        chip(
+            &mut ui,
+            60.0,
+            36.0,
+            "MYBEZO EDITION",
+            mybezo::ACCENT,
+            color::hex(0xdab5ff, 34),
+        );
+        let account_rect = if w < 700.0 {
+            let width = (w * 0.5).min(230.0);
+            [w - width - 16.0, 12.0, width, 40.0]
+        } else {
+            [w - 320.0, 18.0, 288.0, 46.0]
+        };
+        account_chip(
             &mut ui,
             &mut self.targets,
-            [
-                if w < 700.0 { 32.0 } else { w - 320.0 },
-                if w < 700.0 { 47.0 } else { 24.0 },
-                if w < 700.0 { w - 64.0 } else { 288.0 },
-                if w < 700.0 { 34.0 } else { 46.0 },
-            ],
+            account_rect,
             &self.login.status(&self.catalog.config.name),
-            Action::Account,
             self.login.signed_in,
         );
         let tabs = Page::ALL.len() as f32;
         let tab_margin = if w < 700.0 { 16.0 } else { 32.0 };
         let tab_width = (w - 2.0 * tab_margin) / tabs;
+        // The navigation bar: a glass track holding the tabs.
+        card(
+            &mut ui,
+            tab_margin - 5.0,
+            83.0,
+            w - 2.0 * tab_margin + 6.0,
+            52.0,
+            21.0,
+        );
         for (i, page) in Page::ALL.iter().enumerate() {
             let x = tab_margin + i as f32 * tab_width;
             button(
@@ -348,12 +735,21 @@ impl Launcher {
             let installed = horizon_client::official_install::ready(&self.home);
             let installing = self.worker.is_some();
             let progress = *self.install.lock().unwrap();
-            let top = if h < 340.0 { 144.0 } else { 156.0 };
+            let top = if h < 340.0 { 150.0 } else { 162.0 };
+            let play_y = h - 124.0;
+            if !installing {
+                // The hero card: title, facts as chips, one line of help.
+                let card_w = (w - 40.0).min(540.0);
+                let wanted: f32 = if h >= 370.0 { 140.0 } else { 104.0 };
+                let card_h = wanted.min(play_y - 14.0 - (top - 14.0)).max(70.0);
+                card(&mut ui, 20.0, top - 14.0, card_w, card_h, 22.0);
+                ui.rounded(20.0, top - 14.0 + 22.0, 3.0, card_h - 44.0, 1.5, mybezo::ACCENT);
+            }
             ui.text(
                 Face::SemiBold,
                 if installing || h < 340.0 { 28.0 } else { 40.0 },
-                32.0,
-                top,
+                40.0,
+                top - 4.0,
                 color::TEXT,
                 if installing {
                     "Preparing Minecraft"
@@ -361,18 +757,35 @@ impl Launcher {
                     "Horizon"
                 },
             );
-            ui.text(
-                Face::Medium,
-                13.0,
-                32.0,
-                top + 48.0,
-                mybezo::ACCENT,
-                &format!(
-                    "JAVA EDITION  •  {}  •  PROFILE {}",
-                    horizon_core::VANILLA_VERSION,
-                    self.catalog.config.profile
-                ),
-            );
+            {
+                let c = &self.catalog.config;
+                let facts = [
+                    format!("Java {}", horizon_core::VANILLA_VERSION),
+                    format!("Profile {}", c.profile),
+                    c.renderer.label().to_owned(),
+                    format!("{}% res", c.render_scale.percent()),
+                ];
+                let mut x = 40.0;
+                let limit = if installing { w - 32.0 } else { 20.0 + (w - 40.0).min(540.0) - 12.0 };
+                for (i, fact) in facts.iter().enumerate() {
+                    let width = ui.measure(Face::Medium, 11.5, fact) + 20.0;
+                    if x + width > limit {
+                        break;
+                    }
+                    x += chip(
+                        &mut ui,
+                        x,
+                        top + 50.0,
+                        fact,
+                        if i == 0 { mybezo::INK } else { mybezo::ACCENT },
+                        if i == 0 {
+                            mybezo::ACCENT
+                        } else {
+                            color::hex(0xdab5ff, 30)
+                        },
+                    ) + 6.0;
+                }
+            }
             if installing {
                 let current = InstallStage::ALL
                     .iter()
@@ -382,22 +795,27 @@ impl Launcher {
                 if h >= 620.0 {
                     for (index, stage) in InstallStage::ALL.iter().enumerate() {
                         let y = top + 90.0 + index as f32 * row_height;
-                        let label = if index < current {
-                            format!("{:02}  {}  - done", index + 1, stage.label())
+                        // A step marker: a check when done, a lit dot for the current step.
+                        if index < current {
+                            ui.rounded(32.0, y + 2.0, 20.0, 20.0, 10.0, color::hex(0x45c27a, 60));
+                            ui.icon("check", 34.0, y + 4.0, 16.0, style::SUCCESS);
+                        } else if index == current {
+                            ui.rounded(30.0, y, 24.0, 24.0, 12.0, style::GLOW);
+                            ui.rounded(34.0, y + 4.0, 16.0, 16.0, 8.0, mybezo::ACCENT);
                         } else {
-                            format!("{:02}  {}", index + 1, stage.label())
-                        };
+                            ui.border(34.0, y + 4.0, 16.0, 16.0, 8.0, style::LINE);
+                        }
                         ui.text(
                             Face::Regular,
                             16.0,
-                            32.0,
+                            64.0,
                             y,
                             if index == current {
                                 color::TEXT
                             } else {
                                 color::MUTED
                             },
-                            &label,
+                            &format!("{:02}  {}", index + 1, stage.label()),
                         );
                     }
                 } else {
@@ -425,10 +843,25 @@ impl Launcher {
                 };
                 let overall = (current as f32 + fraction.clamp(0.0, 1.0)) / 6.0;
                 let bar_y = h - 152.0;
-                ui.rounded(32.0, bar_y, w - 64.0, 4.0, 2.0, color::RAISED);
+                let bar_w = w - 64.0;
+                ui.rounded(32.0, bar_y, bar_w, 10.0, 5.0, style::WELL);
+                ui.border(32.0, bar_y, bar_w, 10.0, 5.0, style::LINE_SOFT);
                 if overall > 0.0 {
-                    ui.rounded(32.0, bar_y, (w - 64.0) * overall, 4.0, 2.0, mybezo::ACCENT);
+                    let fill = (bar_w * overall).max(10.0);
+                    ui.rounded(32.0, bar_y - 2.0, fill, 14.0, 7.0, style::GLOW_SOFT);
+                    ui.rounded(32.0, bar_y, fill, 10.0, 5.0, mybezo::WARM);
+                    ui.rounded(32.0, bar_y, fill, 8.0, 4.0, mybezo::ACCENT);
                 }
+                let percent = format!("{:.0}%", overall * 100.0);
+                let percent_w = ui.measure(Face::Mono, 13.0, &percent);
+                ui.text(
+                    Face::Mono,
+                    13.0,
+                    32.0 + bar_w - percent_w,
+                    bar_y - 24.0,
+                    mybezo::ACCENT,
+                    &percent,
+                );
                 let detail = match progress.stage {
                     InstallStage::Download => format!(
                         "{:.1} / {:.1} MiB  - verified downloads",
@@ -441,11 +874,12 @@ impl Launcher {
                     ),
                     _ => "Please keep Horizon open. Downloaded files are kept for retry.".into(),
                 };
+                let detail = ui.fit_text(Face::Regular, 14.0, &detail, w - 64.0);
                 ui.text(
                     Face::Regular,
                     14.0,
                     32.0,
-                    bar_y + 12.0,
+                    bar_y + 16.0,
                     color::MUTED,
                     &detail,
                 );
@@ -453,9 +887,9 @@ impl Launcher {
                 ui.text(
                     Face::Regular,
                     15.0,
-                    32.0,
-                    top + 78.0,
-                    color::MUTED,
+                    40.0,
+                    top + 86.0,
+                    style::TEXT_SOFT,
                     if installed {
                         "Your worlds and Java servers"
                     } else {
@@ -468,7 +902,7 @@ impl Launcher {
                     Face::Medium,
                     19.0,
                     32.0,
-                    h - 90.0,
+                    h - 96.0,
                     color::TEXT,
                     progress.stage.label(),
                 );
@@ -476,9 +910,9 @@ impl Launcher {
                 button(
                     &mut ui,
                     &mut self.targets,
-                    [32.0, h - 77.0, (w - 64.0).min(244.0), 49.0],
+                    [32.0, play_y, (w - 64.0).min(300.0), 58.0],
                     if installed {
-                        "Play  ›"
+                        "Play"
                     } else if self.error.is_some() {
                         "Retry installation"
                     } else {
@@ -487,6 +921,53 @@ impl Launcher {
                     Action::Play,
                     true,
                 );
+                // An overview of what this phone has on, beside the art.
+                if w >= 760.0 && h >= 470.0 {
+                    let (cw, ch): (f32, f32) = (300.0, 116.0);
+                    let (cx, cy) = (w - cw - 32.0, h - 66.0 - ch);
+                    card(&mut ui, cx, cy, cw, ch, 18.0);
+                    ui.text(
+                        Face::Medium,
+                        11.5,
+                        cx + 16.0,
+                        cy + 10.0,
+                        mybezo::ACCENT,
+                        "OVERVIEW",
+                    );
+                    let bundled = horizon_client::mod_list::ANDROID_BUNDLED.len();
+                    let rows = [
+                        (
+                            "zap",
+                            "Built-in mods",
+                            format!("{} / {bundled} on", self.catalog.bundled_enabled.len()),
+                        ),
+                        (
+                            "archive",
+                            "Installed content",
+                            self.catalog.local.len().to_string(),
+                        ),
+                        (
+                            "monitor",
+                            "Renderer",
+                            self.catalog.config.renderer.label().to_owned(),
+                        ),
+                    ];
+                    for (i, (icon, title, value)) in rows.iter().enumerate() {
+                        let ry = cy + 34.0 + i as f32 * 26.0;
+                        ui.icon(icon, cx + 16.0, ry + 2.0, 16.0, style::TEXT_SOFT);
+                        ui.text(Face::Regular, 13.5, cx + 40.0, ry, style::TEXT_SOFT, title);
+                        let value = ui.fit_text(Face::Medium, 13.5, value, cw * 0.45);
+                        let vw = ui.measure(Face::Medium, 13.5, &value);
+                        ui.text(
+                            Face::Medium,
+                            13.5,
+                            cx + cw - 16.0 - vw,
+                            ry,
+                            color::TEXT,
+                            &value,
+                        );
+                    }
+                }
             }
         } else if page == Page::Skins {
             self.wardrobe
@@ -494,10 +975,11 @@ impl Launcher {
             self.list_view = Some(self.wardrobe.view);
             self.catalog.scroll = self.catalog.scroll.min(self.wardrobe.view[2]);
         } else if page.is_catalog() {
+            ui.icon(page_icon(page), 32.0, 145.0, 20.0, mybezo::ACCENT);
             ui.text(
-                Face::Medium,
+                Face::SemiBold,
                 18.0,
-                32.0,
+                60.0,
                 142.0,
                 color::TEXT,
                 if page == Page::Mods {
@@ -540,7 +1022,12 @@ impl Launcher {
                 use crate::shader_catalog::Origin;
                 let width = ((w - 185.0) / 2.0).clamp(58.0, 120.0);
                 for (i, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
-                    let rect = [w - 32.0 - (2 - i) as f32 * width, 134.0, width - 5.0, 32.0];
+                    let rect = [w - 32.0 - (2 - i) as f32 * width, 140.0, width - 5.0, 30.0];
+                    let selected = (if page == Page::Mods {
+                        self.catalog.config.mod_source
+                    } else {
+                        self.catalog.config.shader_source
+                    }) == origin;
                     button(
                         &mut ui,
                         &mut self.targets,
@@ -551,16 +1038,8 @@ impl Launcher {
                         } else {
                             Action::ShaderSource(origin)
                         },
-                        false,
+                        selected,
                     );
-                    if (if page == Page::Mods {
-                        self.catalog.config.mod_source
-                    } else {
-                        self.catalog.config.shader_source
-                    }) == origin
-                    {
-                        ui.border(rect[0], rect[1], rect[2], rect[3], 1.0, color::TEXT);
-                    }
                 }
             }
             let hint = match page {
@@ -647,21 +1126,29 @@ impl Launcher {
                 if y < top - 1.0 || y + 68.0 > bottom {
                     continue;
                 }
-                let title = ui.fit_text(Face::Medium, 19.0, title, w - 214.0);
-                let summary = ui.fit_text(Face::Regular, 14.0, description, w - 214.0);
-                ui.text(Face::Medium, 19.0, 32.0, y, color::TEXT, &title);
-                ui.text(Face::Regular, 14.0, 32.0, y + 29.0, color::MUTED, &summary);
+                let on = self.catalog.bundled_enabled.contains(*id);
+                card(&mut ui, 22.0, y - 4.0, w - 44.0, 70.0, 16.0);
+                ui.rounded(32.0, y + 7.0, 44.0, 44.0, 12.0, color::hex(0xdab5ff, if on { 70 } else { 26 }));
+                ui.icon("zap", 42.0, y + 17.0, 24.0, if on { mybezo::ACCENT } else { style::TEXT_SOFT });
+                let title = ui.fit_text(Face::Medium, 18.0, title, (w - 340.0).max(60.0));
+                let summary = ui.fit_text(Face::Regular, 13.5, description, w - 262.0);
+                let title_w = ui.text(Face::Medium, 18.0, 90.0, y + 4.0, color::TEXT, &title);
+                chip(
+                    &mut ui,
+                    96.0 + title_w,
+                    y + 6.0,
+                    if on { "ON" } else { "BUILT-IN" },
+                    if on { mybezo::INK } else { style::TEXT_SOFT },
+                    if on { style::SUCCESS } else { style::LINE_SOFT },
+                );
+                ui.text(Face::Regular, 13.5, 90.0, y + 32.0, color::MUTED, &summary);
                 button(
                     &mut ui,
                     &mut self.targets,
-                    [w - 150.0, y, 118.0, 42.0],
-                    if self.catalog.bundled_enabled.contains(*id) {
-                        "Disable"
-                    } else {
-                        "Enable"
-                    },
+                    [w - 154.0, y + 9.0, 118.0, 40.0],
+                    if on { "Disable" } else { "Enable" },
                     Action::ToggleBundled(id),
-                    false,
+                    !on,
                 );
             }
             for (row, (i, p)) in catalog_rows.into_iter().enumerate() {
@@ -678,20 +1165,37 @@ impl Launcher {
                 if y < top || y + 70.0 > bottom {
                     continue;
                 }
-                let title = ui.fit_text(Face::Medium, 19.0, &p.title, w - 214.0);
-                let summary = ui.fit_text(Face::Regular, 14.0, &p.summary, w - 214.0);
-                ui.text(Face::Medium, 19.0, 32.0, y, color::TEXT, &title);
-                ui.text(Face::Regular, 14.0, 32.0, y + 29.0, color::MUTED, &summary);
+                card(&mut ui, 22.0, y - 4.0, w - 44.0, 70.0, 16.0);
+                ui.rounded(32.0, y + 7.0, 44.0, 44.0, 12.0, style::SURFACE_HI);
+                ui.border(32.0, y + 7.0, 44.0, 44.0, 12.0, style::LINE);
+                let initial: String = p
+                    .title
+                    .chars()
+                    .find(|c| c.is_alphanumeric())
+                    .map_or_else(|| "?".into(), |c| c.to_uppercase().collect());
+                let initial_w = ui.measure(Face::SemiBold, 20.0, &initial);
+                ui.text(
+                    Face::SemiBold,
+                    20.0,
+                    32.0 + (44.0 - initial_w) * 0.5,
+                    y + 15.0,
+                    mybezo::ACCENT,
+                    &initial,
+                );
+                let title = ui.fit_text(Face::Medium, 18.0, &p.title, w - 262.0);
+                let summary = ui.fit_text(Face::Regular, 13.5, &p.summary, w - 262.0);
+                ui.text(Face::Medium, 18.0, 90.0, y + 4.0, color::TEXT, &title);
+                ui.text(Face::Regular, 13.5, 90.0, y + 32.0, color::MUTED, &summary);
                 if let Some(state) = download {
-                    ui.text(Face::Medium, 16.0, w - 150.0, y + 12.0, color::TEXT, &state);
+                    ui.text(Face::Medium, 15.0, w - 154.0, y + 19.0, mybezo::ACCENT, &state);
                 } else if p.kind == crate::browser::Kind::Mod
                     && p.source == crate::browser::SourceId::Modrinth
                 {
                     ui.text(
                         Face::Regular,
                         14.0,
-                        w - 150.0,
-                        y + 12.0,
+                        w - 154.0,
+                        y + 20.0,
                         color::MUTED,
                         "Java mod",
                     );
@@ -699,8 +1203,8 @@ impl Launcher {
                     ui.text(
                         Face::Regular,
                         14.0,
-                        w - 150.0,
-                        y + 12.0,
+                        w - 154.0,
+                        y + 20.0,
                         color::MUTED,
                         ".hnmod: later",
                     );
@@ -709,8 +1213,8 @@ impl Launcher {
                     ui.text(
                         Face::Regular,
                         14.0,
-                        w - 150.0,
-                        y + 12.0,
+                        w - 154.0,
+                        y + 20.0,
                         color::MUTED,
                         "64-bit required",
                     );
@@ -718,7 +1222,7 @@ impl Launcher {
                     button(
                         &mut ui,
                         &mut self.targets,
-                        [w - 150.0, y, 118.0, 42.0],
+                        [w - 154.0, y + 9.0, 118.0, 40.0],
                         self.catalog.install_button(p),
                         Action::Install(i),
                         false,
@@ -825,6 +1329,15 @@ impl Launcher {
                     if y < top || y + row_height - 4.0 > bottom {
                         continue;
                     }
+                    card(&mut ui, 22.0, y - 6.0, w - 44.0, row_height - 6.0, 14.0);
+                    ui.rounded(
+                        22.0,
+                        y + 6.0,
+                        3.0,
+                        row_height - 30.0,
+                        1.5,
+                        if item.enabled { mybezo::ACCENT } else { style::LINE },
+                    );
                     let title = ui.fit_text(
                         Face::Medium,
                         19.0,
@@ -875,11 +1388,12 @@ impl Launcher {
             }
         } else {
             let c = &self.catalog.config;
+            ui.icon("sliders", 32.0, 151.0, 22.0, mybezo::ACCENT);
             ui.text(
-                Face::Medium,
-                24.0,
-                32.0,
-                156.0,
+                Face::SemiBold,
+                22.0,
+                62.0,
+                146.0,
                 color::TEXT,
                 "Launch settings",
             );
@@ -1025,13 +1539,28 @@ impl Launcher {
                 if y < 185.0 || y + if compact { 70.0 } else { 46.0 } > h - 130.0 {
                     continue;
                 }
+                if compact {
+                    card(&mut ui, 22.0, y - 6.0, w - 44.0, 78.0, 16.0);
+                } else {
+                    card(&mut ui, 22.0, y - 7.0, w - 44.0, 60.0, 16.0);
+                }
+                let title_y = y + if compact { 0.0 } else { 13.0 };
+                ui.icon(
+                    setting_icon(action),
+                    34.0,
+                    title_y + 2.0,
+                    18.0,
+                    mybezo::ACCENT,
+                );
+                let title_room = if compact { w - 110.0 } else { w * 0.36 - 76.0 };
+                let title = ui.fit_text(Face::Medium, 15.5, title, title_room.max(40.0));
                 ui.text(
-                    Face::Regular,
-                    16.0,
-                    32.0,
-                    y + if compact { 0.0 } else { 13.0 },
-                    color::MUTED,
-                    title,
+                    Face::Medium,
+                    15.5,
+                    60.0,
+                    title_y,
+                    style::TEXT_SOFT,
+                    &title,
                 );
                 if matches!(
                     action,
@@ -1086,14 +1615,6 @@ impl Launcher {
                         false,
                     );
                 }
-                ui.rounded(
-                    32.0,
-                    y + if compact { 78.0 } else { 62.0 },
-                    w - 64.0,
-                    1.0,
-                    0.0,
-                    color::BORDER,
-                );
             }
             button(
                 &mut ui,
@@ -1113,6 +1634,18 @@ impl Launcher {
             );
         }
         let status = self.error.as_deref().unwrap_or(&self.catalog.status);
+        // The footer: a glass bar with the status line and the repository link.
+        card(&mut ui, 16.0, h - 58.0, w - 32.0, 50.0, 18.0);
+        let failed = self.error.is_some();
+        if !status.trim().is_empty() {
+            ui.icon(
+                if failed { "close" } else { "info-box" },
+                30.0,
+                h - 44.0,
+                16.0,
+                if failed { style::DANGER } else { mybezo::ACCENT },
+            );
+        }
         for (i, line) in status
             .chars()
             .collect::<Vec<_>>()
@@ -1122,22 +1655,22 @@ impl Launcher {
         {
             ui.text(
                 Face::Regular,
-                14.0,
-                32.0,
-                h - 47.0 + i as f32 * 18.0,
-                color::MUTED,
+                13.5,
+                54.0,
+                h - 50.0 + i as f32 * 18.0,
+                if failed { style::DANGER } else { style::TEXT_SOFT },
                 &ui.fit_text(
                     Face::Regular,
-                    14.0,
+                    13.5,
                     &line.iter().collect::<String>(),
-                    (w - 210.0).max(40.0),
+                    (w - 230.0).max(40.0),
                 ),
             );
         }
         button(
             &mut ui,
             &mut self.targets,
-            [w - 142.0, h - 52.0, 110.0, 32.0],
+            [w - 146.0, h - 50.0, 116.0, 34.0],
             "GitHub",
             Action::Repository,
             false,
@@ -1168,8 +1701,8 @@ impl Launcher {
             let height = bottom - top;
             let thumb = (height * height / (height + maximum)).max(20.0).min(height);
             let y = top + (height - thumb) * (scroll / maximum).clamp(0.0, 1.0);
-            ui.rounded(w - 12.0, top, 4.0, height, 2.0, color::BORDER);
-            ui.rounded(w - 12.0, y, 4.0, thumb, 2.0, color::MUTED);
+            ui.rounded(w - 12.0, top, 4.0, height, 2.0, style::LINE_SOFT);
+            ui.rounded(w - 13.0, y, 6.0, thumb, 3.0, mybezo::ACCENT);
         }
         let caret_visible = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1202,24 +1735,42 @@ impl Launcher {
             self.targets.clear();
             self.list_targets.clear();
             self.list_view = None;
-            ui.rounded(0.0, 0.0, w, h, 0.0, horizon_client::hud::rgba(0, 0, 0, 160));
-            let width = (w - 32.0).min(360.0);
+            ui.rounded(0.0, 0.0, w, h, 0.0, horizon_client::hud::rgba(0, 0, 0, 170));
+            let width = (w - 32.0).min(380.0);
             let x = (w - width) * 0.5;
-            let y = (h - 160.0) * 0.5;
-            ui.rounded(x, y, width, 160.0, 8.0, color::RAISED);
+            let y = (h - 168.0) * 0.5;
+            ui.rounded(x - 3.0, y - 3.0, width + 6.0, 174.0, 25.0, style::GLOW_SOFT);
+            ui.rounded(x, y + 6.0, width, 168.0, 22.0, style::SHADOW);
+            ui.rounded(x, y, width, 168.0, 22.0, mybezo::PANEL);
+            ui.border(x, y, width, 168.0, 22.0, style::LINE);
+            ui.rounded(x + 20.0, y + 20.0, 40.0, 40.0, 12.0, color::hex(0xdab5ff, 40));
+            ui.icon("arrow-left", x + 28.0, y + 28.0, 24.0, mybezo::ACCENT);
             ui.text(
-                Face::Medium,
-                22.0,
-                x + 20.0,
-                y + 24.0,
+                Face::SemiBold,
+                21.0,
+                x + 74.0,
+                y + 18.0,
                 color::TEXT,
                 "Minimize Horizon?",
+            );
+            ui.text(
+                Face::Regular,
+                13.5,
+                x + 74.0,
+                y + 46.0,
+                style::TEXT_SOFT,
+                &ui.fit_text(
+                    Face::Regular,
+                    13.5,
+                    "The launcher keeps running in the background.",
+                    width - 94.0,
+                ),
             );
             let bw = (width - 52.0) * 0.5;
             button(
                 &mut ui,
                 &mut self.targets,
-                [x + 20.0, y + 92.0, bw, 44.0],
+                [x + 20.0, y + 102.0, bw, 46.0],
                 "Cancel",
                 Action::Dismiss,
                 false,
@@ -1227,7 +1778,7 @@ impl Launcher {
             button(
                 &mut ui,
                 &mut self.targets,
-                [x + 32.0 + bw, y + 92.0, bw, 44.0],
+                [x + 32.0 + bw, y + 102.0, bw, 46.0],
                 "Minimize",
                 Action::ConfirmMinimize,
                 true,
@@ -1239,7 +1790,9 @@ impl Launcher {
         if let Some(index) = self.focus
             && let Some(([x, y, w, h], _)) = self.targets.get(index)
         {
-            ui.border(*x - 2.0, *y - 2.0, *w + 4.0, *h + 4.0, 2.0, color::TEXT);
+            let radius = (*h * 0.5).min(18.0) + 3.0;
+            ui.border(*x - 3.0, *y - 3.0, *w + 6.0, *h + 6.0, radius, mybezo::ACCENT);
+            ui.border(*x - 4.0, *y - 4.0, *w + 8.0, *h + 8.0, radius + 1.0, style::GLOW);
             self.cursor = (
                 f64::from((x + w / 2.0) * ui.density),
                 f64::from((y + h / 2.0) * ui.density),
@@ -1261,8 +1814,8 @@ impl Launcher {
                     *y,
                     *w,
                     *h,
-                    2.0,
-                    horizon_client::hud::rgba(255, 255, 255, 48),
+                    (*h * 0.5).min(18.0),
+                    horizon_client::hud::rgba(255, 255, 255, 44),
                 );
             }
         }
@@ -1277,8 +1830,8 @@ impl Launcher {
                 *y,
                 *w,
                 *h,
-                2.0,
-                horizon_client::hud::rgba(255, 255, 255, 48),
+                (*h * 0.5).min(18.0),
+                horizon_client::hud::rgba(255, 255, 255, 44),
             );
         }
         crate::documents::draw_ui(&mut ui);

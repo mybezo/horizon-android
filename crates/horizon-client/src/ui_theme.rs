@@ -642,6 +642,186 @@ impl<'a> Ui<'a> {
     }
 
     // ---- the launcher's components ----
+
+    /// A Pixelarticons icon from `horizon_theme::icons` (`"play"`, `"search"`…), `size` dp
+    /// square with its top left at `x, y`, filled with `color`. Unknown names draw nothing.
+    pub fn icon(&mut self, name: &str, x: f32, y: f32, size: f32, color: u32) {
+        let Some(rows) = pixel_icon(name) else {
+            return;
+        };
+        let cell = size / 24.0;
+        for (row, bits) in rows.iter().enumerate() {
+            let mut col = 0u32;
+            while col < 24 {
+                if bits >> col & 1 == 0 {
+                    col += 1;
+                    continue;
+                }
+                let start = col;
+                while col < 24 && bits >> col & 1 == 1 {
+                    col += 1;
+                }
+                self.rounded(
+                    x + start as f32 * cell,
+                    y + row as f32 * cell,
+                    (col - start) as f32 * cell,
+                    cell,
+                    0.0,
+                    color,
+                );
+            }
+        }
+    }
+}
+
+/// Every pixel icon rasterised once into 24 rows of 24 bits (bit `n` is column `n`).
+fn pixel_icon(name: &str) -> Option<[u32; 24]> {
+    static ICONS: std::sync::OnceLock<std::collections::HashMap<&'static str, [u32; 24]>> =
+        std::sync::OnceLock::new();
+    ICONS
+        .get_or_init(|| {
+            horizon_theme::icons::ALL
+                .iter()
+                .map(|(name, svg)| (*name, rasterize_pixel_svg(svg)))
+                .collect()
+        })
+        .get(name)
+        .copied()
+}
+
+/// The icons are rectilinear paths on the 24-unit grid (`M m H h V v Z z`): fill each path
+/// with the non-zero rule, sampling every unit cell at its centre, and merge the paths.
+fn rasterize_pixel_svg(svg: &[u8]) -> [u32; 24] {
+    let text = std::str::from_utf8(svg).unwrap_or("");
+    let mut out = [0u32; 24];
+    let mut rest = text;
+    while let Some(i) = rest.find(" d=\"") {
+        rest = &rest[i + 4..];
+        let Some(end) = rest.find('"') else {
+            break;
+        };
+        let d = &rest[..end];
+        rest = &rest[end..];
+        // Vertical edges: (x, from y, to y).
+        let mut edges: Vec<(f32, f32, f32)> = Vec::new();
+        let mut tokens: Vec<Result<char, f32>> = Vec::new();
+        let bytes = d.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let c = bytes[i] as char;
+            if c.is_ascii_alphabetic() {
+                tokens.push(Ok(c));
+                i += 1;
+            } else if c == '-' || c == '.' || c.is_ascii_digit() {
+                let start = i;
+                i += 1;
+                while i < bytes.len() && ((bytes[i] as char).is_ascii_digit() || bytes[i] == b'.') {
+                    i += 1;
+                }
+                tokens.push(Err(d[start..i].parse().unwrap_or(0.0)));
+            } else {
+                i += 1;
+            }
+        }
+        let (mut cx, mut cy, mut sx, mut sy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let mut command = 'M';
+        let mut numbers: Vec<f32> = Vec::new();
+        let line_to = |edges: &mut Vec<(f32, f32, f32)>, x0: f32, y0: f32, x1: f32, y1: f32| {
+            if (x0 - x1).abs() < 0.001 && (y0 - y1).abs() > 0.001 {
+                edges.push((x0, y0, y1));
+            }
+        };
+        let mut token = 0;
+        while token <= tokens.len() {
+            let next = tokens.get(token).copied();
+            token += 1;
+            match next {
+                Some(Err(n)) => {
+                    numbers.push(n);
+                    let need = match command {
+                        'M' | 'm' | 'L' | 'l' => 2,
+                        _ => 1,
+                    };
+                    if numbers.len() < need {
+                        continue;
+                    }
+                    match command {
+                        'M' | 'm' => {
+                            if (cx, cy) != (sx, sy) {
+                                line_to(&mut edges, cx, cy, sx, sy);
+                            }
+                            if command == 'm' {
+                                cx += numbers[0];
+                                cy += numbers[1];
+                            } else {
+                                cx = numbers[0];
+                                cy = numbers[1];
+                            }
+                            sx = cx;
+                            sy = cy;
+                            // Further pairs are line-tos.
+                            command = if command == 'm' { 'l' } else { 'L' };
+                        }
+                        'L' | 'l' => {
+                            let (nx, ny) = if command == 'l' {
+                                (cx + numbers[0], cy + numbers[1])
+                            } else {
+                                (numbers[0], numbers[1])
+                            };
+                            line_to(&mut edges, cx, cy, nx, ny);
+                            cx = nx;
+                            cy = ny;
+                        }
+                        'H' => cx = numbers[0],
+                        'h' => cx += numbers[0],
+                        'V' => {
+                            line_to(&mut edges, cx, cy, cx, numbers[0]);
+                            cy = numbers[0];
+                        }
+                        'v' => {
+                            line_to(&mut edges, cx, cy, cx, cy + numbers[0]);
+                            cy += numbers[0];
+                        }
+                        _ => {}
+                    }
+                    numbers.clear();
+                }
+                Some(Ok(c)) => {
+                    numbers.clear();
+                    if c == 'Z' || c == 'z' {
+                        line_to(&mut edges, cx, cy, sx, sy);
+                        cx = sx;
+                        cy = sy;
+                    }
+                    command = c;
+                }
+                None => {
+                    line_to(&mut edges, cx, cy, sx, sy);
+                }
+            }
+        }
+        for (row, bits) in out.iter_mut().enumerate() {
+            let yc = row as f32 + 0.5;
+            let mut crossings: Vec<(f32, i32)> = edges
+                .iter()
+                .filter(|(_, a, b)| a.min(*b) < yc && yc < a.max(*b))
+                .map(|(x, a, b)| (*x, if b > a { 1 } else { -1 }))
+                .collect();
+            crossings.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for col in 0..24u32 {
+                let xc = col as f32 + 0.5;
+                let winding: i32 = crossings
+                    .iter()
+                    .take_while(|(x, _)| *x < xc)
+                    .map(|(_, d)| d)
+                    .sum();
+                if winding != 0 {
+                    *bits |= 1 << col;
+                }
+            }
+        }
+    }
+    out
 }
 
 // ---- the boot screen ----
