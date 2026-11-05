@@ -1,6 +1,6 @@
 # Development APKs
 
-The **Android dev APKs** Actions workflow builds ARM64 on code pushes to `android`.
+The **Android dev APKs** Actions workflow builds ARM64 on code pushes to any branch.
 Documentation-only pushes are skipped. Older in-progress builds are cancelled
 when a newer commit arrives. **Run workflow → all_abis** builds all four ABIs.
 Pull requests never receive the signing key or trigger this workflow.
@@ -12,9 +12,15 @@ version contains the run number and source commit. Test data is separate;
 worlds and accounts are not automatically copied from the release app.
 The workflow does not publish GitHub Releases or send Discord messages.
 
-## One-time maintainer setup
+## Optional persistent signing identity
 
-Create a **new, dedicated dev key**, not the release signing key. In PowerShell:
+Builds work without a signing secret: the workflow creates a development key
+and reuses it from its branch-accessible Actions cache. This key is for the
+separate development package only; do not use it for a production release.
+Caches can expire, which can change the development signature.
+
+To keep a stable identity independently of cache retention, create a **new,
+dedicated dev key**, not the release signing key. In PowerShell:
 
 ```powershell
 keytool -genkeypair -keystore "$env:TEMP/horizon-ci-dev.keystore" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -validity 10000 -dname "CN=Horizon Android Dev CI"
@@ -27,7 +33,7 @@ of this key outside the repository. The password/alias above match the existing
 build configuration. Clear the clipboard afterwards. Never attach the key to an
 issue, artifact, release or message.
 
-The workflow fails early if the secret is absent. Keeping the same key permits
+The secret takes precedence over any cached key. Keeping the same key permits
 in-place updates between CI dev builds; replacing it requires reinstalling the
 dev app. Existing locally signed debug APKs may use a different key as well.
 Back up their test data before uninstalling. Normal release installations are

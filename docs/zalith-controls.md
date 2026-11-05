@@ -56,10 +56,21 @@ validation instead of following a republished live-catalog entry.
   invalid/oversized/non-UTF8 imports without replacing a layout, document/profile
   boundaries, and the supplied v12 layout (38 buttons, two layers).
 - `python3 tools/test_zalith_controls.py` runs the reusable storage/document checks; `--layout PATH` additionally checks a supplied layout.
-- Sixteen Android Python checks passed, including the pinned manifest regression.
+- Twenty-one Android Python checks passed, including the pinned manifest regression.
 - actionlint 1.7.7 validated both workflows; workflow/template pairs match.
 - Public source boundary checks and archive integrity are checked before export.
 
 No APK assembly, Microsoft sign-in, real-phone touch interaction or performance
 measurement was run for this port. The compiler/storage checks do not establish
 those runtime results. Test the newly built APK on a phone.
+
+## Development signing follow-up
+
+The dev APK workflow no longer requires a signing secret before its first build.
+It prefers ANDROID_DEV_KEYSTORE_BASE64 when configured, otherwise validates a
+cached development key or generates one with JDK 17 keytool. A newly generated
+key is cached before the later build stages; it is removed from the workspace
+after the job and is not included in APK artifacts. This is a development-only
+identity. A configured dedicated secret gives stable identity beyond cache
+retention. Real JDK 17 generation, validation and reuse, five signing regression
+cases and both workflow templates were checked.

@@ -48,21 +48,23 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           persist-credentials: false
-      - name: Restore dedicated dev signing identity
+      - name: Restore cached development signing identity
+        id: dev-signing-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .local/android/debug.keystore
+          key: horizon-android-dev-signing-v1-${{ runner.os }}
+      - name: Prepare development signing identity
+        id: dev-signing
         env:
           DEV_KEYSTORE: ${{ secrets.ANDROID_DEV_KEYSTORE_BASE64 }}
-        run: |
-          python3 - <<'PY'
-          import base64, os
-          from pathlib import Path
-          value = os.environ.get('DEV_KEYSTORE', '')
-          if not value:
-              raise SystemExit('Set ANDROID_DEV_KEYSTORE_BASE64 first; see docs/android-dev-builds.md')
-          path = Path('.local/android/debug.keystore')
-          path.parent.mkdir(parents=True, exist_ok=True)
-          path.write_bytes(base64.b64decode(value, validate=True))
-          path.chmod(0o600)
-          PY
+        run: python3 tools/android_dev_signing.py --keytool "$JAVA_HOME_17_X64/bin/keytool"
+      - name: Save generated development signing identity
+        if: steps.dev-signing.outputs.source == 'generated' && steps.dev-signing-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .local/android/debug.keystore
+          key: horizon-android-dev-signing-v1-${{ runner.os }}
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
