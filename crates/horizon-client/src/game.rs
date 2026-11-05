@@ -7378,6 +7378,18 @@ impl Game<'_> {
             self.keys.remove(&key);
         }
     }
+    /// Controller actions are independent of the OS modifier word.
+    fn held_control_action(&self, mapping: &str) -> bool {
+        #[cfg(target_os = "android")]
+        if horizon_client::keybinds::key_code(horizon_client::keybinds::KeyBinds::default_of(
+            mapping,
+        ))
+        .is_some_and(|key| self.android_custom_key_held(key))
+        {
+            return true;
+        }
+        self.pad.holds_action(&self.settings.controller, mapping)
+    }
     /// Let a held sneak, sprint or modifier key go when the keyboard reports
     /// its modifier up. A release does not always reach the mapping: a screen
     /// reads presses only, and an unfocused window is given no release at all,
@@ -7402,11 +7414,19 @@ impl Game<'_> {
         let (shift, control) = (self.modifiers.shift_key(), self.modifiers.control_key());
         if !shift {
             for key in [KeyCode::ShiftLeft, KeyCode::ShiftRight] {
+                #[cfg(target_os = "android")]
+                if self.pad.custom_keys.contains(&key) {
+                    continue;
+                }
                 self.physical_keys.remove(&key);
             }
         }
         if !control {
             for key in [KeyCode::ControlLeft, KeyCode::ControlRight] {
+                #[cfg(target_os = "android")]
+                if self.pad.custom_keys.contains(&key) {
+                    continue;
+                }
                 self.physical_keys.remove(&key);
             }
         }
@@ -7421,7 +7441,7 @@ impl Game<'_> {
             };
             // OS modifier bits describe physical keys, not an independently
             // held controller/touch action. Its release is delivered by pad_action.
-            let held = held || self.pad.holds_action(&self.settings.controller, mapping);
+            let held = held || self.held_control_action(mapping);
             if !held {
                 self.toggles.0[slot].set_down(false, needs_toggle);
                 self.sync_toggle(slot);
@@ -16550,18 +16570,17 @@ impl Game<'_> {
         }
         if let WindowEvent::ModifiersChanged(m) = &event {
             self.modifiers = m.state();
+            let controls_held = [
+                self.held_control_action("key.sneak"),
+                self.held_control_action("key.sprint"),
+            ];
             horizon_client_input::modifiers::reconcile(
                 self.modifiers,
                 &mut self.physical_keys,
                 &self.settings.keys,
                 &mut self.toggles,
                 [self.settings.toggle_crouch, self.settings.toggle_sprint],
-                [
-                    self.pad
-                        .holds_action(&self.settings.controller, "key.sneak"),
-                    self.pad
-                        .holds_action(&self.settings.controller, "key.sprint"),
-                ],
+                controls_held,
             );
             self.sync_toggle(SNEAK);
             self.sync_toggle(SPRINT);

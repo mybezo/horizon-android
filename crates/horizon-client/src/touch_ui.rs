@@ -714,6 +714,37 @@ mod tests {
 mod layout_pointer_tests {
     use super::*;
     #[test]
+    fn virtual_mouse_scales_motion_from_one_to_one_thousand_percent() {
+        for (sensitivity, expected) in [
+            (0.01, [100.2, 80.1]),
+            (1.0, [120.0, 90.0]),
+            (10.0, [300.0, 180.0]),
+        ] {
+            let mut ui = TouchUi::default();
+            let cursor = [100.0, 80.0];
+            let size = [1000.0, 1000.0];
+            ui.relative_touch(
+                1,
+                [10.0, 10.0],
+                TouchPhase::Started,
+                cursor,
+                size,
+                sensitivity,
+                true,
+            );
+            let moved = ui.relative_touch(
+                1,
+                [30.0, 20.0],
+                TouchPhase::Moved,
+                cursor,
+                size,
+                sensitivity,
+                true,
+            );
+            assert_eq!(moved, expected);
+        }
+    }
+    #[test]
     fn layout_mouse_hold_keeps_relative_motion_without_an_extra_click() {
         let mut ui = TouchUi::default();
         let size = [400.0, 250.0];

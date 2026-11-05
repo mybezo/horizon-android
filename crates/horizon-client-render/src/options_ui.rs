@@ -362,7 +362,7 @@ impl Opt {
             Opt::TouchSensitivity => unit(s.touch.sensitivity, 0.1, 3.0),
             Opt::TouchSensitivityHorizontal => unit(s.touch.sensitivity_horizontal, 0.1, 3.0),
             Opt::TouchSensitivityVertical => unit(s.touch.sensitivity_vertical, 0.1, 3.0),
-            Opt::TouchMouseSensitivity => unit(s.touch.virtual_mouse_sensitivity, 0.25, 3.0),
+            Opt::TouchMouseSensitivity => unit(s.touch.virtual_mouse_sensitivity, 0.01, 10.0),
             Opt::TouchButtonScale => unit(s.touch.button_scale, 0.5, 2.0),
             Opt::Fov => unit(s.fov, 30.0, 110.0),
             Opt::RenderDistance => unit(
@@ -459,6 +459,7 @@ impl Opt {
     pub fn slider_steps(self) -> Option<u32> {
         match self {
             Opt::Fov => Some(80),
+            Opt::TouchMouseSensitivity => Some(999),
             Opt::RenderDistance => Some((crate::options_file::MAX_RENDER_DISTANCE - 2) as u32),
             Opt::SimulationDistance => Some(27),
             Opt::MaxFps => Some(25),
@@ -1000,7 +1001,9 @@ impl Opt {
             Opt::TouchSensitivity => s.touch.sensitivity = 0.1 + v * 2.9,
             Opt::TouchSensitivityHorizontal => s.touch.sensitivity_horizontal = 0.1 + v * 2.9,
             Opt::TouchSensitivityVertical => s.touch.sensitivity_vertical = 0.1 + v * 2.9,
-            Opt::TouchMouseSensitivity => s.touch.virtual_mouse_sensitivity = 0.25 + v * 2.75,
+            Opt::TouchMouseSensitivity => {
+                s.touch.virtual_mouse_sensitivity = (1.0 + v * 999.0).round() / 100.0;
+            }
             Opt::TouchButtonScale => s.touch.button_scale = 0.5 + v * 1.5,
             Opt::FovEffects | Opt::DarknessPulsing => s.file.set(
                 self.file_key().unwrap(),

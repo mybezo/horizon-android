@@ -31,7 +31,7 @@ pub enum TouchPhase {Started,Moved,Ended,Cancelled}
     for name in ['suppress_relative_click','press_mouse','release_mouse','mouse_held','cancel','cancel_relative','relative_touch','relative_click']:
         text+=block(source,'    pub fn '+name+'(')+'\n'
     text+='}\n#[cfg(test)] mod tests {use super::*;\n'
-    for name in ['explicit_mouse_drag_does_not_generate_an_extra_tap_or_hold_click','virtual_mouse_moves_relatively_and_dragging_never_clicks','virtual_mouse_tap_hold_cancel_and_click_preference','layout_mouse_hold_keeps_relative_motion_without_an_extra_click']:
+    for name in ['virtual_mouse_scales_motion_from_one_to_one_thousand_percent','explicit_mouse_drag_does_not_generate_an_extra_tap_or_hold_click','virtual_mouse_moves_relatively_and_dragging_never_clicks','virtual_mouse_tap_hold_cancel_and_click_preference','layout_mouse_hold_keeps_relative_motion_without_an_extra_click']:
         text+='#[test]\n'+block(source,'    fn '+name+'(')+'\n'
     text+='}\n'
     file=work/'pointer.rs';file.write_text(text)

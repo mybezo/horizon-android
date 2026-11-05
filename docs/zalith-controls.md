@@ -84,3 +84,23 @@ overlay. It starts at the menu center and is hidden during the layout editor
 and gameplay capture. Layout mouse-button holds suppress additional tap clicks.
 Four original/new pointer backend regression tests run through tools/test_android_pointer.py;
 actual phone interaction still needs verification.
+
+## Mouse sensitivity and Shift follow-up
+
+Options > Controls > Touch Controls > Virtual mouse sensitivity now spans
+1–1000% in one-percent steps (100% is the original speed). The existing
+per-profile setting is retained and sanitized without clipping values to 300%.
+This controls the relative menu pointer, independently of camera sensitivity.
+
+OS modifier recovery now preserves sneak/sprint held by the touch layout.
+The controller state also protects these holds during ModifiersChanged events,
+while missing hardware releases still recover normally. Raw Shift continues to
+act as the inventory modifier; rebinding sneak does not turn its new key into
+an inventory Shift. tools/test_android_control_keys.py exercises the production
+latch helpers with synthetic input providers and actual key mappings.
+
+Validation for this follow-up: five pointer backend tests, four input/settings
+regressions, seven controller/storage tests (including the supplied layout),
+and 21 Android Python tests passed. Android ARM64 cargo check, rustfmt,
+actionlint and the public source boundary check passed. This is compiler and
+backend validation; an APK was not assembled or tested on a phone here.
