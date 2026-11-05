@@ -1614,6 +1614,12 @@ impl ChatScreen {
         self.suggestions_key(m, c, winit::keyboard::KeyCode::Tab, shift);
     }
 
+    /// Android's dedicated history buttons keep their meaning even with suggestions open.
+    #[cfg(any(target_os = "android", test))]
+    pub fn android_history(&mut self, m: &Measure, c: &Commands, history: &[String], older: bool) {
+        self.move_in_history(m, c, history, if older { -1 } else { 1 });
+    }
+
     /// `ChatScreen.moveInHistory`.
     fn move_in_history(&mut self, m: &Measure, c: &Commands, history: &[String], dir: isize) {
         let max = history.len();

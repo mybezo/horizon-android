@@ -1,5 +1,5 @@
 //! System IME for NativeActivity, using stock EditText on Android's UI looper.
-//! No project Java classes or cross-thread View operations are required.
+//! The activity forwards chat navigation keys while EditText has focus.
 use jni::{
     JNIEnv, JavaVM, NativeMethod,
     objects::{GlobalRef, JObject, JValue},
@@ -14,6 +14,8 @@ use std::{
     },
 };
 
+use winit::keyboard::KeyCode;
+
 #[link(name = "android")]
 unsafe extern "C" {
     fn ALooper_forThread() -> *mut std::ffi::c_void;
@@ -26,11 +28,12 @@ unsafe extern "C" {
         data: *mut std::ffi::c_void,
     ) -> i32;
 }
+
 enum Command {
     Show(String, bool),
     Hide,
     Poll,
-    ChatTab,
+    ChatKey(KeyCode),
     ReplaceChat { before: String, after: String },
     Minimize,
     Capture(bool),
@@ -49,7 +52,7 @@ struct Ui {
     writer: Mutex<UnixStream>,
     text: Mutex<String>,
     polling: AtomicBool,
-    chat_tab_ready: AtomicBool,
+    chat_keys: Mutex<VecDeque<KeyCode>>,
     chat_active: AtomicBool,
     active: AtomicBool,
     ready: AtomicBool,
@@ -85,9 +88,9 @@ pub unsafe fn initialize(
             env.register_native_methods(
                 class,
                 &[NativeMethod {
-                    name: "nativeChatTab".into(),
-                    sig: "()Z".into(),
-                    fn_ptr: native_chat_tab as *mut std::ffi::c_void,
+                    name: "nativeChatKey".into(),
+                    sig: "(I)Z".into(),
+                    fn_ptr: native_chat_key as *mut std::ffi::c_void,
                 }],
             )?;
 
@@ -172,7 +175,7 @@ pub unsafe fn initialize(
         writer: Mutex::new(writer),
         text: Mutex::new(String::new()),
         polling: AtomicBool::new(false),
-        chat_tab_ready: AtomicBool::new(false),
+        chat_keys: Mutex::new(VecDeque::new()),
         chat_active: AtomicBool::new(false),
         active: AtomicBool::new(false),
         ready: AtomicBool::new(false),
@@ -398,6 +401,10 @@ impl Ui {
                 }
             }
             Command::Show(text, secret) => {
+                self.chat_keys
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clear();
                 env.call_method(
                     &self.edit,
                     "setInputType",
@@ -447,6 +454,10 @@ impl Ui {
                 self.ready.store(true, Ordering::Release);
             }
             Command::Hide => {
+                self.chat_keys
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clear();
                 *self
                     .keyboard_request
                     .lock()
@@ -467,9 +478,8 @@ impl Ui {
             Command::Minimize => {
                 env.call_method(&self.activity, "moveTaskToBack", "(Z)Z", &[JValue::Bool(1)])?;
             }
-            command @ (Command::Poll | Command::ChatTab) => {
-                let complete = matches!(command, Command::ChatTab);
-                if !complete {
+            command @ (Command::Poll | Command::ChatKey(_)) => {
+                if matches!(command, Command::Poll) {
                     self.polling.store(false, Ordering::Release);
                 }
                 self.try_show_keyboard(env)?;
@@ -478,8 +488,11 @@ impl Ui {
                     .text
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = text;
-                if complete {
-                    self.chat_tab_ready.store(true, Ordering::Release);
+                if let Command::ChatKey(key) = command {
+                    self.chat_keys
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push_back(key);
                 }
             }
             Command::ReplaceChat { before, after } => {
@@ -720,7 +733,10 @@ fn show_mode(text: &str, secret: bool, chat: bool) -> bool {
         winit::platform::android::set_native_text_input_active(true);
         // Do not diff an earlier editor buffer while Show is queued on the UI thread.
         ui.ready.store(false, Ordering::Release);
-        ui.chat_tab_ready.store(false, Ordering::Release);
+        ui.chat_keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         ui.chat_active.store(chat, Ordering::Release);
         ui.active.store(true, Ordering::Release);
         ui.enqueue(Command::Show(text.into(), secret));
@@ -733,7 +749,10 @@ pub fn hide() {
     winit::platform::android::set_native_text_input_active(false);
     if let Some(ui) = UI.get() {
         ui.active.store(false, Ordering::Release);
-        ui.chat_tab_ready.store(false, Ordering::Release);
+        ui.chat_keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         ui.chat_active.store(false, Ordering::Release);
         ui.enqueue(Command::Hide)
     }
@@ -754,8 +773,18 @@ pub fn text() -> Option<String> {
     )
 }
 
-extern "system" fn native_chat_tab(_: JNIEnv<'_>, _: JObject<'_>) -> jni::sys::jboolean {
-    u8::from(request_chat_tab())
+extern "system" fn native_chat_key(
+    _: JNIEnv<'_>,
+    _: JObject<'_>,
+    key: jni::sys::jint,
+) -> jni::sys::jboolean {
+    let key = match key {
+        19 => KeyCode::ArrowUp,   // KEYCODE_DPAD_UP
+        20 => KeyCode::ArrowDown, // KEYCODE_DPAD_DOWN
+        61 => KeyCode::Tab,       // KEYCODE_TAB
+        _ => return 0,
+    };
+    u8::from(request_chat_key(key))
 }
 
 pub fn replace_chat(before: &str, after: &str) -> bool {
@@ -773,21 +802,27 @@ pub fn replace_chat(before: &str, after: &str) -> bool {
     true
 }
 
-/// Read the current Android editor before completing a chat command.
-pub fn request_chat_tab() -> bool {
+/// Read the current Android editor before running a history or completion action.
+pub fn request_chat_key(key: KeyCode) -> bool {
     let Some(ui) = UI
         .get()
         .filter(|ui| ui.chat_active.load(Ordering::Acquire) && !ui.failed.load(Ordering::Acquire))
     else {
         return false;
     };
-    ui.enqueue(Command::ChatTab);
+    ui.enqueue(Command::ChatKey(key));
     true
 }
 
-pub fn take_chat_tab() -> bool {
-    UI.get()
-        .is_some_and(|ui| ui.chat_tab_ready.swap(false, Ordering::AcqRel))
+pub fn take_chat_key() -> Option<KeyCode> {
+    let ui = UI.get()?;
+    if !ui.chat_active.load(Ordering::Acquire) || !ui.ready.load(Ordering::Acquire) {
+        return None;
+    }
+    ui.chat_keys
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .pop_front()
 }
 
 pub fn minimize() {

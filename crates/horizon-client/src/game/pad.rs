@@ -42,7 +42,7 @@ pub(super) struct Pads {
     #[cfg(target_os = "android")]
     pub(super) touch_ui: horizon_client::touch_ui::TouchUi,
     #[cfg(target_os = "android")]
-    pub(super) chat_tab_finger: Option<u64>,
+    pub(super) chat_control_finger: Option<(u64, KeyCode)>,
     /// Splitscreen: this player's pad, read by `PadRouter` for every game, instead of the pads.
     pub(super) feed: Option<PadState>,
     /// The real controllers and the DualSense's output.

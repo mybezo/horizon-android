@@ -543,13 +543,7 @@ impl Game<'_> {
                         if self.debug_key(key, action) {
                             continue;
                         }
-                        if key == KeyCode::Tab
-                            && self.screen == Screen::Chat
-                            && self.title.is_none()
-                        {
-                            if pressed {
-                                self.android_chat_tab();
-                            }
+                        if self.route_android_chat_key(key, pressed) {
                             continue;
                         }
                         if key == KeyCode::Escape {

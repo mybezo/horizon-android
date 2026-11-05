@@ -32,6 +32,9 @@ impl Game<'_> {
         else {
             return Ok(false);
         };
+        if self.screen == Screen::Chat && Self::is_android_chat_key(key) {
+            return Ok(false);
+        }
         // Menu arrows work independently of the optional gameplay keypad profile.
         let arrow = matches!(
             key,
@@ -218,6 +221,9 @@ impl Game<'_> {
                 KeyAction::Release
             };
             if self.debug_key(key, action) {
+                continue;
+            }
+            if self.route_android_chat_key(key, down) {
                 continue;
             }
             for mapped in self.settings.keys.translate_all(key) {
@@ -498,66 +504,73 @@ impl Game<'_> {
             crate::platform::show(&initial);
         }
     }
-    pub(super) fn android_chat_tab(&mut self) {
-        if !crate::native_ime::request_chat_tab() {
-            self.complete_android_chat();
+    pub(super) fn is_android_chat_key(key: KeyCode) -> bool {
+        matches!(key, KeyCode::Tab | KeyCode::ArrowUp | KeyCode::ArrowDown)
+    }
+
+    pub(super) fn route_android_chat_key(&mut self, key: KeyCode, down: bool) -> bool {
+        if self.screen != Screen::Chat || self.title.is_some() || !Self::is_android_chat_key(key) {
+            return false;
+        }
+        if down {
+            self.android_chat_key(key);
+        }
+        true
+    }
+
+    pub(super) fn android_chat_key(&mut self, key: KeyCode) {
+        if !crate::native_ime::request_chat_key(key) {
+            self.apply_android_chat_key(key);
         }
     }
 
-    fn complete_android_chat(&mut self) {
-        if self.screen != Screen::Chat || self.title.is_some() {
-            return;
-        }
-        self.apply_android_chat_tab();
-    }
-
-    pub(super) fn android_chat_tab_touch(&mut self, touch: &Touch) -> bool {
-        if self.pad.chat_tab_finger == Some(touch.id) {
+    pub(super) fn android_chat_controls_touch(&mut self, touch: &Touch) -> bool {
+        if let Some((finger, key)) = self.pad.chat_control_finger
+            && finger == touch.id
+        {
             if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
-                self.pad.chat_tab_finger = None;
-                if touch.phase == TouchPhase::Ended && self.android_chat_tab_at(touch) {
-                    self.android_chat_tab();
+                self.pad.chat_control_finger = None;
+                if touch.phase == TouchPhase::Ended
+                    && self.android_chat_touch_key(touch) == Some(key)
+                {
+                    self.android_chat_key(key);
                 }
             }
             return true;
         }
-        if self.pad.chat_tab_finger.is_none()
+        if self.pad.chat_control_finger.is_none()
             && touch.phase == TouchPhase::Started
-            && self.android_chat_tab_at(touch)
+            && let Some(key) = self.android_chat_touch_key(touch)
         {
-            self.pad.chat_tab_finger = Some(touch.id);
+            self.pad.chat_control_finger = Some((touch.id, key));
             return true;
         }
         false
     }
 
-    fn android_chat_tab_at(&self, touch: &Touch) -> bool {
+    fn android_chat_touch_key(&self, touch: &Touch) -> Option<KeyCode> {
+        let scale = f64::from(self.gui_scale()?.scale);
+        self.android_chat_button_at((
+            (touch.location.x / scale) as i32,
+            (touch.location.y / scale) as i32,
+        ))
+    }
+
+    pub(super) fn android_chat_button_at(&self, point: (i32, i32)) -> Option<KeyCode> {
         if self.screen != Screen::Chat
             || self.title.is_some()
             || super::zalith::pointer_blocked()
-            || !self
-                .ui
-                .chat_screen
-                .as_ref()
-                .is_some_and(|screen| screen.value().starts_with('/'))
+            || self.ui.chat_screen.is_none()
         {
-            return false;
+            return None;
         }
-        let Some(mut batch) = self.gui_scale() else {
-            return false;
-        };
+        let mut batch = self.gui_scale()?;
         batch.height = Self::visible_chat_height(&batch);
-        let [x, y, w, h] = Self::android_chat_tab_rect(&batch);
-        horizon_client::screen_draw::inside(
-            (
-                (touch.location.x / f64::from(batch.scale)) as i32,
-                (touch.location.y / f64::from(batch.scale)) as i32,
-            ),
-            x,
-            y,
-            w,
-            h,
-        )
+        Self::android_chat_buttons(&batch)
+            .into_iter()
+            .find_map(|(key, _, [x, y, w, h])| {
+                horizon_client::screen_draw::inside(point, x, y, w, h).then_some(key)
+            })
     }
 
     pub(super) fn android_poll_keyboard(&mut self) {
@@ -575,7 +588,7 @@ impl Game<'_> {
                 result.unwrap_or_else(|e| format!("File export failed: {e}")),
             ));
         }
-        let complete_chat = crate::native_ime::take_chat_tab();
+        let chat_key = crate::native_ime::take_chat_key();
         for out in if super::zalith::poll_editor() {
             vec![]
         } else {
@@ -591,8 +604,11 @@ impl Game<'_> {
                 self.android_show_keyboard();
             }
         }
-        if complete_chat {
-            self.complete_android_chat();
+        if let Some(key) = chat_key
+            && self.screen == Screen::Chat
+            && self.title.is_none()
+        {
+            self.apply_android_chat_key(key);
         }
         // Title screens also use Playing: their focused text fields must keep
         // the IME until the user confirms or closes the editor.

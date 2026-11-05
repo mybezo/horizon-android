@@ -245,6 +245,35 @@ fn mod_commands_are_coloured_and_complete_like_vanilla_ones() {
 }
 
 #[test]
+fn android_history_recalls_commands_with_suggestions_open_and_restores_draft() {
+    let font = font();
+    let m = Measure(&font);
+    let registries = Registries::default();
+    let dispatcher = crate::command::Dispatcher::new().with_mod_commands(["test"]);
+    let c = Commands {
+        dispatcher: &dispatcher,
+        registries: &registries,
+    };
+    let history = vec!["/test first".to_owned(), "/test latest".to_owned()];
+    let mut screen = ChatScreen::new(&m, &c, "", history.len(), 640, 360, full());
+    screen.type_text(&m, &c, "/tes");
+    assert!(screen.suggestions_visible());
+    for (older, expected) in [
+        (true, "/test latest"),
+        (true, "/test first"),
+        (true, "/test first"),
+        (false, "/test latest"),
+        (false, "/tes"),
+        (false, "/tes"),
+    ] {
+        screen.android_history(&m, &c, &history, older);
+        assert_eq!(screen.value(), expected);
+    }
+    screen.android_tab(&m, &c, false);
+    assert_eq!(screen.value(), "/test");
+}
+
+#[test]
 fn android_tab_completes_a_command_with_suggestion_popup_disabled() {
     let font = font();
     let m = Measure(&font);

@@ -763,8 +763,10 @@ impl Game<'_> {
     /// Keys while the chat screen is open.
     pub(super) fn chat_key(&mut self, event: &KeyEvent) {
         #[cfg(target_os = "android")]
-        if event.physical_key == PhysicalKey::Code(KeyCode::Tab) {
-            self.android_chat_tab();
+        if let PhysicalKey::Code(key) = event.physical_key
+            && Self::is_android_chat_key(key)
+        {
+            self.android_chat_key(key);
             return;
         }
         if let Some(shortcut) = self.edit_shortcut(event) {
@@ -853,7 +855,7 @@ impl Game<'_> {
         }
     }
     #[cfg(target_os = "android")]
-    pub(super) fn apply_android_chat_tab(&mut self) {
+    pub(super) fn apply_android_chat_key(&mut self, key: KeyCode) {
         let shift = self.has_shift_down();
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
@@ -862,7 +864,13 @@ impl Game<'_> {
         };
         if let Some(screen) = self.ui.chat_screen.as_mut() {
             let before = screen.value().to_owned();
-            screen.android_tab(&m, &c, shift);
+            match key {
+                KeyCode::Tab => screen.android_tab(&m, &c, shift),
+                KeyCode::ArrowUp | KeyCode::ArrowDown => {
+                    screen.android_history(&m, &c, &self.ui.chat.recent, key == KeyCode::ArrowUp)
+                }
+                _ => return,
+            }
             if before != screen.value() {
                 crate::platform::replace_chat(&before, screen.value());
             }
@@ -971,6 +979,11 @@ impl Game<'_> {
     }
     pub(super) fn chat_click(&mut self) {
         let cursor = self.cursor;
+        #[cfg(target_os = "android")]
+        if let Some(key) = self.android_chat_button_at((cursor.0 as i32, cursor.1 as i32)) {
+            self.android_chat_key(key);
+            return;
+        }
         let height = self.renderer.as_ref().map_or(720.0, |r| {
             HudBatch::new([r.config.width, r.config.height]).height
         });
@@ -1207,8 +1220,14 @@ impl Game<'_> {
         Some(horizon_protocol::crypto::uuid_string(bits))
     }
     #[cfg(target_os = "android")]
-    pub(super) fn android_chat_tab_rect(batch: &HudBatch) -> [i32; 4] {
-        [batch.width as i32 - 41, batch.height as i32 - 16, 38, 14]
+    pub(super) fn android_chat_buttons(batch: &HudBatch) -> [(KeyCode, &'static str, [i32; 4]); 3] {
+        let right = batch.width as i32 - 3;
+        let y = batch.height as i32 - 16;
+        [
+            (KeyCode::ArrowUp, "↑", [right - 88, y, 23, 14]),
+            (KeyCode::ArrowDown, "↓", [right - 63, y, 23, 14]),
+            (KeyCode::Tab, "TAB", [right - 38, y, 38, 14]),
+        ]
     }
 
     pub(super) fn draw_chat_screen(&mut self, batch: &mut HudBatch) {
@@ -1238,12 +1257,9 @@ impl Game<'_> {
             registries: &self.ui.registries,
         };
         #[cfg(target_os = "android")]
-        let tab = screen
-            .value()
-            .starts_with('/')
-            .then(|| Self::android_chat_tab_rect(batch));
+        let buttons = Self::android_chat_buttons(batch);
         #[cfg(target_os = "android")]
-        let chat_width = tab.map_or(batch.width as i32, |[x, _, _, _]| x - 2);
+        let chat_width = buttons[0].2[0] - 2;
         #[cfg(not(target_os = "android"))]
         let chat_width = batch.width as i32;
         screen.resize(&m, &c, chat_width, batch.height as i32);
@@ -1261,11 +1277,11 @@ impl Game<'_> {
         #[allow(unused_mut)]
         let mut draws = screen.draw(&m, mouse, blink, background);
         #[cfg(target_os = "android")]
-        if let Some([x, y, w, h]) = tab {
+        for (_, label, [x, y, w, h]) in buttons {
             horizon_client::screen_draw::button(
                 &mut draws,
                 &m,
-                &Text::literal("TAB"),
+                &Text::literal(label),
                 x,
                 y,
                 w,
