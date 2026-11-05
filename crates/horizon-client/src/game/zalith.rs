@@ -137,7 +137,7 @@ pub(super) fn density(window: &Window) -> f32 {
     let [x, y] = winit::platform::android::native_input_scale();
     (window.scale_factor() * x.min(y)) as f32
 }
-fn pointer_blocked() -> bool {
+pub(super) fn pointer_blocked() -> bool {
     with(|s| s.editor.is_some() || s.menu.open)
 }
 pub(super) fn virtual_mouse() -> bool {
@@ -241,16 +241,18 @@ pub(super) fn touch(t: &Touch, size: [u32; 2], density: f32, playing: bool) -> b
             match t.phase {
                 TouchPhase::Moved => s.menu.moved(t.id, at, screen),
                 TouchPhase::Ended => {
+                    let was_open = s.menu.open;
                     if let Some(choice) = s.menu.up(t.id, at) {
                         s.choices.push(choice);
                     }
                     s.menu_fingers.remove(&t.id);
-                    if s.menu.open {
+                    if !was_open && s.menu.open {
                         s.release();
                     }
                     s.persist_display();
                 }
                 TouchPhase::Cancelled => {
+                    s.menu.cancel(t.id);
                     s.menu_fingers.remove(&t.id);
                 }
                 _ => {}
@@ -369,8 +371,8 @@ pub(super) fn draw(
                 controls_hidden: s.hidden,
                 size: s.size,
                 fitted,
-                larger_interface: false,
-                debug_scale: 0,
+                virtual_mouse: s.virtual_mouse,
+                camera_sensitivity: settings.touch.sensitivity,
             },
         );
     });
@@ -403,14 +405,8 @@ fn choice(choice: Choice) -> bool {
             }
             true
         }
-        Choice::Opacity => {
-            with(|s| {
-                s.opacity = if s.opacity > 0.3 {
-                    s.opacity - 0.25
-                } else {
-                    1.0
-                }
-            });
+        Choice::Opacity(value) => {
+            with(|s| s.opacity = f32::from(value) / 100.0);
             true
         }
         Choice::HideControls => {
@@ -422,20 +418,12 @@ fn choice(choice: Choice) -> bool {
         }
         Choice::Size => {
             with(|s| {
-                s.controls.size = if s.controls.size > 0.65 {
-                    s.controls.size - 0.1
-                } else {
-                    1.2
-                }
+                s.size = match s.size {
+                    None => Some(0.75),
+                    Some(size) if size < 1.15 => Some(size + 0.15),
+                    _ => None,
+                };
             });
-            true
-        }
-        Choice::Keyboard => {
-            if crate::platform::active() {
-                crate::platform::hide()
-            } else {
-                crate::platform::show("")
-            };
             true
         }
         Choice::Close => {
@@ -555,6 +543,15 @@ impl Game<'_> {
                         if self.debug_key(key, action) {
                             continue;
                         }
+                        if key == KeyCode::Tab
+                            && self.screen == Screen::Chat
+                            && self.title.is_none()
+                        {
+                            if pressed {
+                                self.android_chat_tab();
+                            }
+                            continue;
+                        }
                         if key == KeyCode::Escape {
                             if pressed {
                                 let _ = self.pad_back();
@@ -641,8 +638,30 @@ impl Game<'_> {
                     self.settings.touch.crosshair_gestures = !self.settings.touch.crosshair_gestures
                 }
                 Choice::Gyroscope => self.settings.touch.gyroscope = !self.settings.touch.gyroscope,
+                Choice::CameraSensitivity(value) => {
+                    let value = f32::from(value) / 100.0;
+                    self.settings.touch.sensitivity = value;
+                    self.pad.touch.settings.sensitivity = value;
+                }
                 Choice::Pause => {
+                    with(|s| s.menu.open = false);
                     let _ = self.pad_back();
+                }
+                Choice::Keyboard => {
+                    with(|s| s.menu.open = false);
+                    if crate::platform::active() {
+                        crate::platform::hide();
+                    } else {
+                        self.android_show_keyboard();
+                    }
+                }
+                Choice::Minimize => {
+                    with(|s| {
+                        s.menu.open = false;
+                        s.release();
+                    });
+                    crate::platform::hide();
+                    crate::native_ime::minimize();
                 }
                 _ => {}
             }

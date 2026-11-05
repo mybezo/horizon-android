@@ -1009,6 +1009,8 @@ struct Awaiting {
     /// The command up to the cursor, as sent.
     truncated: String,
     local: Vec<Suggestion>,
+    #[cfg(any(target_os = "android", test))]
+    complete_on_reply: Option<bool>,
 }
 /// `ClientSuggestionProvider.pendingSuggestionsId`: one counter for the
 /// connection, so a reply to an older request never matches.
@@ -1252,6 +1254,8 @@ impl ChatScreen {
                         id,
                         truncated,
                         local: list,
+                        #[cfg(any(target_os = "android", test))]
+                        complete_on_reply: None,
                     });
                     self.pending = None;
                 } else {
@@ -1326,6 +1330,10 @@ impl ChatScreen {
         let (range, list) = merge_suggestions(input, all);
         self.pending = Some((range.0, list));
         self.update_usage_info(m, c);
+        #[cfg(any(target_os = "android", test))]
+        if let Some(shift) = awaiting.complete_on_reply {
+            self.android_tab(m, c, shift);
+        }
     }
     /// `CommandSuggestions.updateUsageInfo`.
     fn update_usage_info(&mut self, m: &Measure, c: &Commands) {
@@ -1592,6 +1600,20 @@ impl ChatScreen {
             false
         }
     }
+    /// One Android Tab tap completes an available suggestion, or waits for the
+    /// reply to the current command. Editing the command replaces that request.
+    #[cfg(any(target_os = "android", test))]
+    pub fn android_tab(&mut self, m: &Measure, c: &Commands, shift: bool) {
+        if let Some(awaiting) = &mut self.awaiting {
+            awaiting.complete_on_reply = Some(shift);
+            return;
+        }
+        if self.suggestions.is_none() {
+            self.show_suggestions(m, true);
+        }
+        self.suggestions_key(m, c, winit::keyboard::KeyCode::Tab, shift);
+    }
+
     /// `ChatScreen.moveInHistory`.
     fn move_in_history(&mut self, m: &Measure, c: &Commands, history: &[String], dir: isize) {
         let max = history.len();

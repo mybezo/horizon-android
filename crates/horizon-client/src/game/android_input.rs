@@ -487,7 +487,9 @@ impl Game<'_> {
         } else {
             String::new()
         };
-        if matches!(
+        if self.screen == Screen::Chat && self.title.is_none() {
+            crate::platform::show_chat(&initial);
+        } else if matches!(
             self.book,
             Some(super::books::BookScreen::Edit { signing: false, .. })
         ) {
@@ -496,6 +498,68 @@ impl Game<'_> {
             crate::platform::show(&initial);
         }
     }
+    pub(super) fn android_chat_tab(&mut self) {
+        if !crate::native_ime::request_chat_tab() {
+            self.complete_android_chat();
+        }
+    }
+
+    fn complete_android_chat(&mut self) {
+        if self.screen != Screen::Chat || self.title.is_some() {
+            return;
+        }
+        self.apply_android_chat_tab();
+    }
+
+    pub(super) fn android_chat_tab_touch(&mut self, touch: &Touch) -> bool {
+        if self.pad.chat_tab_finger == Some(touch.id) {
+            if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                self.pad.chat_tab_finger = None;
+                if touch.phase == TouchPhase::Ended && self.android_chat_tab_at(touch) {
+                    self.android_chat_tab();
+                }
+            }
+            return true;
+        }
+        if self.pad.chat_tab_finger.is_none()
+            && touch.phase == TouchPhase::Started
+            && self.android_chat_tab_at(touch)
+        {
+            self.pad.chat_tab_finger = Some(touch.id);
+            return true;
+        }
+        false
+    }
+
+    fn android_chat_tab_at(&self, touch: &Touch) -> bool {
+        if self.screen != Screen::Chat
+            || self.title.is_some()
+            || super::zalith::pointer_blocked()
+            || !self
+                .ui
+                .chat_screen
+                .as_ref()
+                .is_some_and(|screen| screen.value().starts_with('/'))
+        {
+            return false;
+        }
+        let Some(mut batch) = self.gui_scale() else {
+            return false;
+        };
+        batch.height = Self::visible_chat_height(&batch);
+        let [x, y, w, h] = Self::android_chat_tab_rect(&batch);
+        horizon_client::screen_draw::inside(
+            (
+                (touch.location.x / f64::from(batch.scale)) as i32,
+                (touch.location.y / f64::from(batch.scale)) as i32,
+            ),
+            x,
+            y,
+            w,
+            h,
+        )
+    }
+
     pub(super) fn android_poll_keyboard(&mut self) {
         self.android_custom_events();
         if let Some(notice) = crate::documents::poll() {
@@ -511,6 +575,7 @@ impl Game<'_> {
                 result.unwrap_or_else(|e| format!("File export failed: {e}")),
             ));
         }
+        let complete_chat = crate::native_ime::take_chat_tab();
         for out in if super::zalith::poll_editor() {
             vec![]
         } else {
@@ -525,6 +590,9 @@ impl Game<'_> {
             } else if next_sign_line {
                 self.android_show_keyboard();
             }
+        }
+        if complete_chat {
+            self.complete_android_chat();
         }
         // Title screens also use Playing: their focused text fields must keep
         // the IME until the user confirms or closes the editor.

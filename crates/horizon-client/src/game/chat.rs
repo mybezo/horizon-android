@@ -762,6 +762,11 @@ impl Game<'_> {
     }
     /// Keys while the chat screen is open.
     pub(super) fn chat_key(&mut self, event: &KeyEvent) {
+        #[cfg(target_os = "android")]
+        if event.physical_key == PhysicalKey::Code(KeyCode::Tab) {
+            self.android_chat_tab();
+            return;
+        }
         if let Some(shortcut) = self.edit_shortcut(event) {
             let m = Measure(&self.gui.atlas.font);
             let c = Commands {
@@ -847,6 +852,23 @@ impl Game<'_> {
             }
         }
     }
+    #[cfg(target_os = "android")]
+    pub(super) fn apply_android_chat_tab(&mut self) {
+        let shift = self.has_shift_down();
+        let m = Measure(&self.gui.atlas.font);
+        let c = Commands {
+            dispatcher: chat_tree(&self.remote, &self.mods),
+            registries: &self.ui.registries,
+        };
+        if let Some(screen) = self.ui.chat_screen.as_mut() {
+            let before = screen.value().to_owned();
+            screen.android_tab(&m, &c, shift);
+            if before != screen.value() {
+                crate::platform::replace_chat(&before, screen.value());
+            }
+        }
+    }
+
     /// The server's completions for an `ask_server` request
     /// (ClientPacketListener.handleCommandSuggestions).
     pub(super) fn chat_server_suggestions(
@@ -861,7 +883,13 @@ impl Game<'_> {
             registries: &self.ui.registries,
         };
         if let Some(screen) = self.ui.chat_screen.as_mut() {
+            #[cfg(target_os = "android")]
+            let before = screen.value().to_owned();
             screen.server_suggestions(&m, &c, id, range, list);
+            #[cfg(target_os = "android")]
+            if before != screen.value() {
+                crate::platform::replace_chat(&before, screen.value());
+            }
         }
     }
     /// Text typed into the chat box (control socket `chat`).
@@ -1113,7 +1141,7 @@ impl Game<'_> {
     /// `viewport_bottom()` enqueues a fresh bounds read when none is pending,
     /// so calling this every frame while chat is open keeps the value fresh.
     #[cfg(target_os = "android")]
-    fn visible_chat_height(batch: &HudBatch) -> f32 {
+    pub(super) fn visible_chat_height(batch: &HudBatch) -> f32 {
         let Some(bottom) = crate::native_ime::viewport_bottom() else {
             return batch.height;
         };
@@ -1178,6 +1206,11 @@ impl Game<'_> {
         }
         Some(horizon_protocol::crypto::uuid_string(bits))
     }
+    #[cfg(target_os = "android")]
+    pub(super) fn android_chat_tab_rect(batch: &HudBatch) -> [i32; 4] {
+        [batch.width as i32 - 41, batch.height as i32 - 16, 38, 14]
+    }
+
     pub(super) fn draw_chat_screen(&mut self, batch: &mut HudBatch) {
         let Some(mut screen) = self.ui.chat_screen.take() else {
             return;
@@ -1204,7 +1237,16 @@ impl Game<'_> {
             dispatcher: chat_tree(&self.remote, &self.mods),
             registries: &self.ui.registries,
         };
-        screen.resize(&m, &c, batch.width as i32, batch.height as i32);
+        #[cfg(target_os = "android")]
+        let tab = screen
+            .value()
+            .starts_with('/')
+            .then(|| Self::android_chat_tab_rect(batch));
+        #[cfg(target_os = "android")]
+        let chat_width = tab.map_or(batch.width as i32, |[x, _, _, _]| x - 2);
+        #[cfg(not(target_os = "android"))]
+        let chat_width = batch.width as i32;
+        screen.resize(&m, &c, chat_width, batch.height as i32);
         // Options.getBackgroundColor(Integer.MIN_VALUE).
         let background = if self.settings.file.bool("backgroundForChatOnly") {
             i32::MIN
@@ -1216,7 +1258,22 @@ impl Game<'_> {
             .ui
             .chat_opened
             .map_or(0, |t| t.elapsed().as_millis() as u64);
-        let draws = screen.draw(&m, mouse, blink, background);
+        #[allow(unused_mut)]
+        let mut draws = screen.draw(&m, mouse, blink, background);
+        #[cfg(target_os = "android")]
+        if let Some([x, y, w, h]) = tab {
+            horizon_client::screen_draw::button(
+                &mut draws,
+                &m,
+                &Text::literal("TAB"),
+                x,
+                y,
+                w,
+                h,
+                true,
+                false,
+            );
+        }
         horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
         self.ui.chat_screen = Some(screen);
         if in_bed {

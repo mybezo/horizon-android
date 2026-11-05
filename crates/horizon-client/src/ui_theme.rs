@@ -68,6 +68,17 @@ pub mod color {
     }
 }
 
+/// Palette shared by the Mybezo Android launcher and quick controls.
+pub mod mybezo {
+    use super::color::hex;
+    pub const BACKGROUND: u32 = hex(0x0d1810, 255);
+    pub const PANEL: u32 = hex(0x142319, 248);
+    pub const RAISED: u32 = hex(0x253a29, 255);
+    pub const BORDER: u32 = hex(0x536c49, 255);
+    pub const LIME: u32 = hex(0xd0fb83, 255);
+    pub const INK: u32 = hex(0x162410, 255);
+}
+
 /// The launcher's type scale and shapes (`horizon_theme`), in dp.
 pub(crate) const SMALL: f32 = horizon_theme::CAPTION.px;
 pub(crate) const BODY: f32 = horizon_theme::LABEL.px;

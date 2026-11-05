@@ -503,6 +503,18 @@ pub fn capture_mouse(capture: bool) -> bool {
 pub fn show(text: &str) {
     show_editor(text, false);
 }
+pub fn show_chat(text: &str) {
+    MULTILINE.with(|mode| mode.set(false));
+    if crate::native_ime::show_chat(text) {
+        EDIT.with(|edit| *edit.borrow_mut() = Some(text.into()));
+    }
+}
+
+pub fn replace_chat(before: &str, after: &str) {
+    if crate::native_ime::replace_chat(before, after) {
+        EDIT.with(|edit| *edit.borrow_mut() = Some(after.into()));
+    }
+}
 pub fn show_secret(text: &str) {
     MULTILINE.with(|mode| mode.set(false));
     if crate::native_ime::show_secret(text) {

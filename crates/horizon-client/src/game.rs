@@ -15984,6 +15984,7 @@ impl ApplicationHandler for Game<'_> {
         // Android may recreate the surface while the IME changes window size.
         // Preserve the text session; Android hides its window on real backgrounding.
         self.android_release_touch_keys(true);
+        self.pad.chat_tab_finger = None;
         self.capture(false);
         self.keys.clear();
         self.physical_keys.clear();
@@ -16154,6 +16155,11 @@ impl Game<'_> {
             }
             if matches!(&event, WindowEvent::Touch(_)) {
                 crate::touch_input(true);
+            }
+            if let WindowEvent::Touch(touch) = &event
+                && self.android_chat_tab_touch(touch)
+            {
+                return;
             }
             if let WindowEvent::Touch(touch) = &event
                 && (crate::touch_visible() || zalith::editing())

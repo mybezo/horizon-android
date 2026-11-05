@@ -1,5 +1,8 @@
 use super::*;
-use horizon_client::{osk::Output, ui_theme::color};
+use horizon_client::{
+    osk::Output,
+    ui_theme::{color, mybezo},
+};
 use winit::{
     event::{KeyEvent, Touch},
     keyboard::{KeyCode, PhysicalKey},
@@ -21,7 +24,7 @@ pub(super) enum Action {
     ToggleLocal(usize),
     DeleteLocal(usize),
     ConfirmDeleteLocal,
-    ConfirmExit,
+    ConfirmMinimize,
     Next,
     Previous,
     Profile,
@@ -85,6 +88,81 @@ pub(super) enum Action {
     GpuProfile,
 }
 
+/// A native block landscape behind the Play page, drawn by the same HUD as its buttons.
+fn draw_play_background(ui: &mut Ui, w: f32, h: f32) {
+    use color::hex;
+    let cell = (w / 53.0).min(h / 29.0).max(1.0);
+    let horizon = h * 0.57;
+    let sun = 4.3 * cell;
+    let sx = w * 0.82;
+    let sy = h * 0.41;
+    for (expand, alpha) in [(2.7, 17), (1.7, 28), (0.8, 52), (0.0, 230)] {
+        let edge = expand * cell;
+        ui.rounded(
+            sx - edge,
+            sy - edge,
+            sun + 2.0 * edge,
+            sun + 2.0 * edge,
+            0.0,
+            hex(0xd7f299, alpha),
+        );
+    }
+    for (layer, tint) in [(0, 0x213829), (1, 0x2e4b34), (2, 0x38583a)] {
+        for col in 0..32 {
+            let x = w * 0.34 + col as f32 * w * 0.66 / 32.0;
+            let ridge = ((col * 7 + layer * 11) % 13) as f32 * cell * 0.31;
+            let y = horizon + layer as f32 * cell * 2.1 - ridge;
+            ui.rounded(x, y, w * 0.66 / 32.0 + 1.0, h - y, 0.0, hex(tint, 255));
+        }
+    }
+    let island_x = w * 0.61;
+    let island_y = h * 0.64;
+    for col in 0..18 {
+        let x = island_x + col as f32 * cell;
+        let top = island_y - ((col * 13) % 7) as f32 * cell * 0.29;
+        let depth = (7.0 - (col as f32 - 8.5).abs() * 0.54) * cell;
+        ui.rounded(x, top, cell + 0.5, depth, 0.0, hex(0x26392d, 255));
+        ui.rounded(x, top, cell + 0.5, cell * 0.65, 0.0, hex(0x81a954, 255));
+    }
+    for (col, height) in [(2.0, 3.2), (6.0, 4.7), (10.0, 3.8), (15.0, 4.3)] {
+        let x = island_x + col * cell;
+        let y = island_y - cell * 1.4;
+        ui.rounded(
+            x - cell * 0.18,
+            y - height * cell,
+            cell * 0.36,
+            height * cell,
+            0.0,
+            hex(0x5e5236, 255),
+        );
+        for tier in 0..4 {
+            let width = (0.7 + tier as f32 * 0.61) * cell;
+            ui.rounded(
+                x - width * 0.5,
+                y - height * cell + tier as f32 * cell * 0.65,
+                width,
+                cell * 0.72,
+                0.0,
+                hex(0x5c894b, 255),
+            );
+        }
+    }
+    // Keep the wordmark and account controls readable over the scene.
+    for i in 0..32 {
+        let left = i as f32 * w * 0.77 / 32.0;
+        let alpha = 235 - i * 7;
+        ui.rounded(
+            left,
+            0.0,
+            w * 0.77 / 32.0 + 0.5,
+            h,
+            0.0,
+            hex(0x0d1810, alpha),
+        );
+    }
+    ui.rounded(0.0, 0.0, w, 134.0, 0.0, hex(0x0d1810, 212));
+}
+
 pub(super) fn button(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
@@ -99,8 +177,8 @@ pub(super) fn button(
         y,
         w,
         h,
-        2.0,
-        if accent { color::ACCENT } else { color::RAISED },
+        6.0,
+        if accent { mybezo::LIME } else { mybezo::RAISED },
     );
     let padding = (w * 0.12).clamp(4.0, 12.0);
     let base = if w < 80.0 { 13.0 } else { 16.0 };
@@ -116,11 +194,7 @@ pub(super) fn button(
         font,
         x + padding,
         y + 11.0,
-        if accent {
-            color::ON_ACCENT
-        } else {
-            color::TEXT
-        },
+        if accent { mybezo::INK } else { color::TEXT },
         &label,
     );
     targets.push((rect, action));
@@ -247,22 +321,20 @@ impl Launcher {
             ui.h = ui.h.min(bottom as f32 / ui.density);
         }
         let (w, h) = (ui.w, ui.h);
-        let scale = ui.density / ui.batch.scale;
-        ui.batch
-            .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, color::BG);
+        ui.rounded(0.0, 0.0, w, h, 0.0, mybezo::BACKGROUND);
+        if self.catalog.page == Page::Play {
+            draw_play_background(&mut ui, w, h);
+        }
+        ui.rounded(20.0, 13.0, 28.0, 28.0, 5.0, mybezo::LIME);
+        ui.text(Face::SemiBold, 19.0, 26.0, 15.0, mybezo::INK, "M");
+        ui.text(Face::SemiBold, 22.0, 58.0, 11.0, color::TEXT, "Horizon");
         ui.text(
             Face::Medium,
-            if w < 400.0 {
-                20.0
-            } else if w < 700.0 {
-                24.0
-            } else {
-                32.0
-            },
-            32.0,
-            if w < 700.0 { 12.0 } else { 28.0 },
-            color::TEXT,
-            &format!("Horizon Android {}", crate::backend::VERSION),
+            10.0,
+            59.0,
+            36.0,
+            mybezo::LIME,
+            "MYBEZO EDITION",
         );
         button(
             &mut ui,
@@ -306,32 +378,30 @@ impl Launcher {
             let installed = horizon_client::official_install::ready(&self.home);
             let installing = self.worker.is_some();
             let progress = *self.install.lock().unwrap();
-            let top = 160.0;
+            let top = if h < 340.0 { 144.0 } else { 156.0 };
             ui.text(
-                Face::Medium,
-                32.0,
+                Face::SemiBold,
+                if installing || h < 340.0 { 28.0 } else { 40.0 },
                 32.0,
                 top,
                 color::TEXT,
                 if installing {
-                    "Getting your game ready"
-                } else if installed {
-                    "Ready to play"
+                    "Preparing Minecraft"
                 } else {
-                    if compact {
-                        "Your Java worlds"
-                    } else {
-                        "Your Java worlds, on Android"
-                    }
+                    "Horizon"
                 },
             );
             ui.text(
-                Face::Regular,
-                17.0,
+                Face::Medium,
+                13.0,
                 32.0,
-                top + 47.0,
-                color::MUTED,
-                &format!("Minecraft 26.3  /  Profile {}", self.catalog.config.profile),
+                top + 48.0,
+                mybezo::LIME,
+                &format!(
+                    "JAVA EDITION  •  {}  •  PROFILE {}",
+                    horizon_core::VANILLA_VERSION,
+                    self.catalog.config.profile
+                ),
             );
             if installing {
                 let current = InstallStage::ALL
@@ -409,30 +479,19 @@ impl Launcher {
                     color::MUTED,
                     &detail,
                 );
-            } else {
-                let rows = if installed {
-                    [
-                        "01  Open a world or join a Java server",
-                        "02  Touch setup: Options > Controls",
-                        "03  Find packs and .hmod in the tabs",
-                    ]
-                } else {
-                    [
-                        "01  Download resources from Mojang",
-                        "02  Install and verify on this phone",
-                        "03  Play offline or sign in for servers",
-                    ]
-                };
-                for (index, line) in rows.iter().enumerate() {
-                    ui.text(
-                        Face::Regular,
-                        17.0,
-                        32.0,
-                        top + 100.0 + index as f32 * 42.0,
-                        color::MUTED,
-                        line,
-                    );
-                }
+            } else if h >= 370.0 {
+                ui.text(
+                    Face::Regular,
+                    15.0,
+                    32.0,
+                    top + 78.0,
+                    color::MUTED,
+                    if installed {
+                        "Your worlds and Java servers"
+                    } else {
+                        "Set up Minecraft on this device"
+                    },
+                );
             }
             if installing {
                 ui.text(
@@ -447,9 +506,9 @@ impl Launcher {
                 button(
                     &mut ui,
                     &mut self.targets,
-                    [32.0, h - 100.0, 320.0, 60.0],
+                    [32.0, h - 77.0, (w - 64.0).min(244.0), 49.0],
                     if installed {
-                        "Play"
+                        "Play  ›"
                     } else if self.error.is_some() {
                         "Retry installation"
                     } else {
@@ -1184,7 +1243,7 @@ impl Launcher {
                 x + 20.0,
                 y + 24.0,
                 color::TEXT,
-                "Exit application?",
+                "Minimize Horizon?",
             );
             let bw = (width - 52.0) * 0.5;
             button(
@@ -1199,9 +1258,9 @@ impl Launcher {
                 &mut ui,
                 &mut self.targets,
                 [x + 32.0 + bw, y + 92.0, bw, 44.0],
-                "Exit",
-                Action::ConfirmExit,
-                false,
+                "Minimize",
+                Action::ConfirmMinimize,
+                true,
             );
         }
         if let Some(action) = self.pending_focus.take() {
@@ -1311,8 +1370,11 @@ impl Launcher {
             audio.play_button_click();
         }
         match action {
-            Some(Action::ConfirmExit) => {
-                events.exit();
+            Some(Action::ConfirmMinimize) => {
+                self.exit_confirmation = false;
+                self.focus = None;
+                crate::platform::hide();
+                crate::native_ime::minimize();
             }
             Some(Action::Immersive) => {
                 self.catalog.config.screen.immersive ^= true;

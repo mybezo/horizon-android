@@ -1,7 +1,7 @@
 //! System IME for NativeActivity, using stock EditText on Android's UI looper.
 //! No project Java classes or cross-thread View operations are required.
 use jni::{
-    JNIEnv, JavaVM,
+    JNIEnv, JavaVM, NativeMethod,
     objects::{GlobalRef, JObject, JValue},
 };
 use std::{
@@ -30,6 +30,9 @@ enum Command {
     Show(String, bool),
     Hide,
     Poll,
+    ChatTab,
+    ReplaceChat { before: String, after: String },
+    Minimize,
     Capture(bool),
     Bounds,
     ImportDocument,
@@ -46,6 +49,8 @@ struct Ui {
     writer: Mutex<UnixStream>,
     text: Mutex<String>,
     polling: AtomicBool,
+    chat_tab_ready: AtomicBool,
+    chat_active: AtomicBool,
     active: AtomicBool,
     ready: AtomicBool,
     bounds_pending: AtomicBool,
@@ -76,6 +81,16 @@ pub unsafe fn initialize(
         .with_local_frame(32, |env| -> jni::errors::Result<_> {
             let activity = unsafe { JObject::from_raw(activity) };
             crate::document_bridge::register(env, &activity, crate::documents::document_result)?;
+            let class = env.get_object_class(&activity)?;
+            env.register_native_methods(
+                class,
+                &[NativeMethod {
+                    name: "nativeChatTab".into(),
+                    sig: "()Z".into(),
+                    fn_ptr: native_chat_tab as *mut std::ffi::c_void,
+                }],
+            )?;
+
             let content = env
                 .call_method(
                     &activity,
@@ -157,6 +172,8 @@ pub unsafe fn initialize(
         writer: Mutex::new(writer),
         text: Mutex::new(String::new()),
         polling: AtomicBool::new(false),
+        chat_tab_ready: AtomicBool::new(false),
+        chat_active: AtomicBool::new(false),
         active: AtomicBool::new(false),
         ready: AtomicBool::new(false),
         bounds_pending: AtomicBool::new(false),
@@ -188,6 +205,16 @@ pub unsafe fn initialize(
     Ok(())
 }
 impl Ui {
+    fn read_editor(&self, env: &mut JNIEnv<'_>) -> jni::errors::Result<String> {
+        let editable = env
+            .call_method(&self.edit, "getText", "()Landroid/text/Editable;", &[])?
+            .l()?;
+        let value = env
+            .call_method(editable, "toString", "()Ljava/lang/String;", &[])?
+            .l()?;
+        Ok(env.get_string(&value.into())?.into())
+    }
+
     fn enqueue(&self, c: Command) {
         self.commands
             .lock()
@@ -437,20 +464,48 @@ impl Ui {
                 env.call_method(&self.edit, "setFocusable", "(Z)V", &[JValue::Bool(0)])?;
                 env.call_method(&self.native, "requestFocus", "()Z", &[])?;
             }
-            Command::Poll => {
-                self.polling.store(false, Ordering::Release);
+            Command::Minimize => {
+                env.call_method(&self.activity, "moveTaskToBack", "(Z)Z", &[JValue::Bool(1)])?;
+            }
+            command @ (Command::Poll | Command::ChatTab) => {
+                let complete = matches!(command, Command::ChatTab);
+                if !complete {
+                    self.polling.store(false, Ordering::Release);
+                }
                 self.try_show_keyboard(env)?;
-                let editable = env
-                    .call_method(&self.edit, "getText", "()Landroid/text/Editable;", &[])?
-                    .l()?;
-                let text = env
-                    .call_method(editable, "toString", "()Ljava/lang/String;", &[])?
-                    .l()?;
-                let text: String = env.get_string(&text.into())?.into();
+                let text = self.read_editor(env)?;
                 *self
                     .text
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = text;
+                if complete {
+                    self.chat_tab_ready.store(true, Ordering::Release);
+                }
+            }
+            Command::ReplaceChat { before, after } => {
+                let mut actual = self.read_editor(env)?;
+                // A key typed while a server response was in flight belongs to the player.
+                if actual == before {
+                    let value = JObject::from(env.new_string(&after)?);
+                    env.call_method(
+                        &self.edit,
+                        "setText",
+                        "(Ljava/lang/CharSequence;)V",
+                        &[JValue::Object(&value)],
+                    )?;
+                    env.call_method(
+                        &self.edit,
+                        "setSelection",
+                        "(I)V",
+                        &[JValue::Int(after.encode_utf16().count() as i32)],
+                    )?;
+                    actual = after;
+                }
+                *self
+                    .text
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = actual;
+                self.ready.store(true, Ordering::Release);
             }
             Command::Bounds => {
                 self.bounds_pending.store(false, Ordering::Release);
@@ -652,16 +707,21 @@ fn callback_inner(ui: &Ui) -> i32 {
     1
 }
 pub fn show(text: &str) -> bool {
-    show_mode(text, false)
+    show_mode(text, false, false)
 }
 pub fn show_secret(text: &str) -> bool {
-    show_mode(text, true)
+    show_mode(text, true, false)
 }
-fn show_mode(text: &str, secret: bool) -> bool {
+pub fn show_chat(text: &str) -> bool {
+    show_mode(text, false, true)
+}
+fn show_mode(text: &str, secret: bool, chat: bool) -> bool {
     if let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
         winit::platform::android::set_native_text_input_active(true);
         // Do not diff an earlier editor buffer while Show is queued on the UI thread.
         ui.ready.store(false, Ordering::Release);
+        ui.chat_tab_ready.store(false, Ordering::Release);
+        ui.chat_active.store(chat, Ordering::Release);
         ui.active.store(true, Ordering::Release);
         ui.enqueue(Command::Show(text.into(), secret));
         true
@@ -673,6 +733,8 @@ pub fn hide() {
     winit::platform::android::set_native_text_input_active(false);
     if let Some(ui) = UI.get() {
         ui.active.store(false, Ordering::Release);
+        ui.chat_tab_ready.store(false, Ordering::Release);
+        ui.chat_active.store(false, Ordering::Release);
         ui.enqueue(Command::Hide)
     }
 }
@@ -690,6 +752,48 @@ pub fn text() -> Option<String> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone(),
     )
+}
+
+extern "system" fn native_chat_tab(_: JNIEnv<'_>, _: JObject<'_>) -> jni::sys::jboolean {
+    u8::from(request_chat_tab())
+}
+
+pub fn replace_chat(before: &str, after: &str) -> bool {
+    let Some(ui) = UI
+        .get()
+        .filter(|ui| ui.chat_active.load(Ordering::Acquire) && !ui.failed.load(Ordering::Acquire))
+    else {
+        return false;
+    };
+    ui.ready.store(false, Ordering::Release);
+    ui.enqueue(Command::ReplaceChat {
+        before: before.into(),
+        after: after.into(),
+    });
+    true
+}
+
+/// Read the current Android editor before completing a chat command.
+pub fn request_chat_tab() -> bool {
+    let Some(ui) = UI
+        .get()
+        .filter(|ui| ui.chat_active.load(Ordering::Acquire) && !ui.failed.load(Ordering::Acquire))
+    else {
+        return false;
+    };
+    ui.enqueue(Command::ChatTab);
+    true
+}
+
+pub fn take_chat_tab() -> bool {
+    UI.get()
+        .is_some_and(|ui| ui.chat_tab_ready.swap(false, Ordering::AcqRel))
+}
+
+pub fn minimize() {
+    if let Some(ui) = UI.get() {
+        ui.enqueue(Command::Minimize);
+    }
 }
 
 /// View operations, including pointer capture, belong to the Java UI thread.

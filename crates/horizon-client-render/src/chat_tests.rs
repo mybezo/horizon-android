@@ -245,6 +245,23 @@ fn mod_commands_are_coloured_and_complete_like_vanilla_ones() {
 }
 
 #[test]
+fn android_tab_completes_a_command_with_suggestion_popup_disabled() {
+    let font = font();
+    let m = Measure(&font);
+    let registries = Registries::default();
+    let dispatcher = crate::command::Dispatcher::new().with_mod_commands(["test"]);
+    let c = Commands {
+        dispatcher: &dispatcher,
+        registries: &registries,
+    };
+    let mut screen = ChatScreen::new(&m, &c, "", 0, 640, 360, full());
+    screen.auto_suggestions = false;
+    screen.type_text(&m, &c, "/tes");
+    screen.android_tab(&m, &c, false);
+    assert_eq!(screen.value(), "/test");
+}
+
+#[test]
 fn chat_completes_the_servers_custom_completions_with_the_players() {
     // CommandSuggestions.updateCommandInfo completes chat from
     // ClientSuggestionProvider.getCustomTabSuggestions: the online players
@@ -340,6 +357,23 @@ fn ask_server_nodes_wait_for_the_servers_completions() {
     screen.server_suggestions(&m, &c, request, (13, 2), reply("pt6:check"));
     tab(&mut screen);
     assert_eq!(screen.value(), "/bossbar get pt6:check");
+
+    // The Android button is one tap, even before the server has answered.
+    let mut android = ChatScreen::new(&m, &c, "", 0, 640, 360, full());
+    android.type_text(&m, &c, "/bossbar get pt");
+    let (request, _) = android.take_request().expect("the server is asked");
+    android.android_tab(&m, &c, false);
+    android.server_suggestions(&m, &c, request - 1, (13, 2), reply("pt6:old"));
+    assert_eq!(android.value(), "/bossbar get pt");
+    android.server_suggestions(&m, &c, request, (13, 2), reply("pt6:check"));
+    assert_eq!(android.value(), "/bossbar get pt6:check");
+
+    android.suggest_command(&m, &c, "/bossbar get pt");
+    let (request, _) = android.take_request().expect("the server is asked");
+    android.android_tab(&m, &c, false);
+    android.type_text(&m, &c, "x");
+    android.server_suggestions(&m, &c, request, (13, 2), reply("pt6:old"));
+    assert_eq!(android.value(), "/bossbar get ptx");
     // Without the server's provider the local list is done at once.
     let local = crate::command::vanilla::game_dispatcher();
     let c = Commands {
