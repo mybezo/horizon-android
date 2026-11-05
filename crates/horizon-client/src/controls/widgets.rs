@@ -2,7 +2,7 @@
 //! the design system's dark palette, laid out in physical pixels. A frame
 //! records where each action's button is; a tap looks it up.
 use super::Rect;
-use crate::ui_theme::{Face, Ui, color};
+use crate::ui_theme::{Face, Ui, color, mybezo};
 
 pub(super) struct Hits<A> {
     list: Vec<(A, Rect)>,
@@ -47,12 +47,12 @@ impl<A: Clone> Hits<A> {
     }
 }
 
-pub(super) const PLATE: u32 = color::hex(horizon_theme::DARK.surface, 240);
-pub(super) const RAISED: u32 = color::hex(horizon_theme::DARK.plate, 255);
+pub(super) const PLATE: u32 = mybezo::PANEL;
+pub(super) const RAISED: u32 = mybezo::RAISED;
 pub(super) const TEXT: u32 = color::TEXT;
 pub(super) const MUTED: u32 = color::MUTED;
-pub(super) const ACCENT: u32 = color::ACCENT;
-pub(super) const ON_ACCENT: u32 = color::ON_ACCENT;
+pub(super) const ACCENT: u32 = mybezo::ACCENT;
+pub(super) const ON_ACCENT: u32 = mybezo::INK;
 
 pub(super) fn plate(ui: &mut Ui, r: Rect, radius: f32, colour: u32) {
     ui.rounded_px(
@@ -100,7 +100,7 @@ pub(super) fn centred(ui: &mut Ui, r: Rect, size: f32, face: Face, colour: u32, 
     );
 }
 
-/// A pill button; `primary` in the accent.
+/// A compact panel button; `primary` in the accent.
 pub(super) fn button<A: Clone>(
     ui: &mut Ui,
     hits: &mut Hits<A>,
@@ -109,14 +109,15 @@ pub(super) fn button<A: Clone>(
     primary: bool,
     action: A,
 ) {
-    plate(ui, r, r.h / 2.0, if primary { ACCENT } else { RAISED });
+    plate(ui, r, r.h * 0.18, if primary { ACCENT } else { RAISED });
+    let label = ui.fit_text(Face::Medium, 13.0, label, (r.w / ui.density - 8.0).max(0.0));
     centred(
         ui,
         r,
         13.0,
         Face::Medium,
         if primary { ON_ACCENT } else { TEXT },
-        label,
+        &label,
     );
     hits.push(action, r);
 }

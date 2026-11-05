@@ -667,7 +667,7 @@ impl Controls {
             .map_or(&default, |s| s.config(screen.dark))
             .clone();
         let p = w.pressed;
-        let alpha = if p { style.pressed_alpha } else { style.alpha } * opacity;
+        let alpha = (if p { style.pressed_alpha } else { style.alpha }).clamp(0.0, 1.0) * opacity;
         let sp = if p {
             style.pressed_font_size
         } else {
@@ -775,7 +775,7 @@ impl Controls {
         let r = self.stick_rect(id, screen);
         let shape = self.stick_shape(id, screen.dark);
         let s = self.sticks[id.0][id.1];
-        let alpha = shape.alpha * opacity;
+        let alpha = shape.alpha.clamp(0.0, 1.0) * opacity;
         let colour = |c: Argb| with_alpha(c, alpha);
         let side = r.w.min(r.h);
         let (x0, y0, x1, y1) = (

@@ -3,7 +3,7 @@
 //! gestures, the gyroscope, the controls' opacity, the keyboard).
 use super::widgets::{self, Hits, MUTED, TEXT};
 use super::*;
-use crate::ui_theme::{Face, color::hex, mybezo};
+use crate::ui_theme::{Face, color::with_alpha, mybezo};
 
 /// The player's touch settings the menu changes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -15,6 +15,7 @@ pub struct Settings {
     pub camera_sensitivity: f32,
     /// The controls' opacity, 0..1.
     pub opacity: f32,
+    pub gear_opacity: f32,
     pub controls_hidden: bool,
     /// The controls' size; none fits the layout to the screen.
     pub size: Option<f32>,
@@ -30,6 +31,7 @@ pub enum Choice {
     Gestures,
     Gyroscope,
     Opacity(u8),
+    GearOpacity(u8),
     CameraSensitivity(u16),
     HideControls,
     Size,
@@ -42,6 +44,7 @@ pub enum Choice {
 #[derive(Clone, Copy, PartialEq)]
 enum Slider {
     Opacity,
+    GearOpacity,
     Camera,
 }
 
@@ -49,6 +52,7 @@ impl Slider {
     fn value(self, fraction: f32) -> Choice {
         match self {
             Self::Opacity => Choice::Opacity((10.0 + fraction * 90.0).round() as u8),
+            Self::GearOpacity => Choice::GearOpacity((10.0 + fraction * 90.0).round() as u8),
             Self::Camera => Choice::CameraSensitivity((1.0 + fraction * 999.0).round() as u16),
         }
     }
@@ -87,7 +91,7 @@ impl Menu {
             hits: Hits::new(),
             on_ball: None,
             pending: None,
-            sliders: Vec::with_capacity(2),
+            sliders: Vec::with_capacity(3),
             drag: None,
         }
     }
@@ -189,6 +193,21 @@ impl Menu {
             || self.drag.as_ref().is_some_and(|drag| drag.finger == finger)
     }
 
+    /// Apply the thumb position while dragging. Cancel drops the preview;
+    /// lifting a finger commits the same value through Choice.
+    pub fn preview_controls_opacity(&self, opacity: f32) -> f32 {
+        self.opacity_preview(Slider::Opacity, opacity)
+    }
+
+    fn opacity_preview(&self, kind: Slider, opacity: f32) -> f32 {
+        self.drag
+            .as_ref()
+            .filter(|drag| drag.kind == kind)
+            .map_or(opacity, |drag| {
+                (10.0 + drag.fraction() * 90.0).round() / 100.0
+            })
+    }
+
     pub fn draw(
         &mut self,
         batch: &mut HudBatch,
@@ -200,59 +219,54 @@ impl Menu {
         self.hits.clear();
         self.sliders.clear();
         let (x, y, r) = self.ball_disc(screen);
-        let ball = Rect {
-            x: x - r,
-            y: y - r,
-            w: 2.0 * r,
-            h: 2.0 * r,
-        };
-        widgets::plate(&mut ui, ball, r * 0.36, mybezo::LIME);
-        // The gear is drawn as geometry, so it works with every bundled font.
-        for tooth in 0..8 {
-            let a = tooth as f32 * std::f32::consts::FRAC_PI_4;
-            let size = r * 0.23;
-            widgets::plate(
-                &mut ui,
-                Rect {
-                    x: x + a.cos() * r * 0.49 - size / 2.0,
-                    y: y + a.sin() * r * 0.49 - size / 2.0,
-                    w: size,
-                    h: size,
-                },
-                size * 0.16,
-                mybezo::INK,
-            );
-        }
-        for (radius, color) in [(r * 0.46, mybezo::INK), (r * 0.20, mybezo::LIME)] {
-            widgets::plate(
-                &mut ui,
-                Rect {
-                    x: x - radius,
-                    y: y - radius,
-                    w: 2.0 * radius,
-                    h: 2.0 * radius,
-                },
-                radius,
-                color,
-            );
-        }
+        let opacity = self.opacity_preview(Slider::GearOpacity, settings.gear_opacity);
+        Self::gear(&mut ui, x, y, r, opacity);
         if self.open {
             self.draw_panel(&mut ui, screen, settings);
         }
         ui.finish();
     }
 
+    fn gear(ui: &mut Ui, x: f32, y: f32, r: f32, opacity: f32) {
+        let gear_color = with_alpha(mybezo::ACCENT, opacity);
+        let scale = ui.batch.scale;
+        let atlas = ui.atlas;
+        // A hollow gear drawn as one ring of quads. Its centre and surrounding
+        // area are transparent, while ball_disc keeps a generous touch target.
+        let ring_point = |i: usize, radius: f32| {
+            let angle = i as f32 * std::f32::consts::TAU / 32.0;
+            [
+                (x + angle.cos() * radius) / scale,
+                (y + angle.sin() * radius) / scale,
+            ]
+        };
+        let tooth = |i: usize| r * if matches!(i % 4, 1 | 2) { 0.50 } else { 0.38 };
+        for i in 0..32 {
+            let next = (i + 1) % 32;
+            ui.batch.fill_quad(
+                atlas,
+                [
+                    ring_point(i, r * 0.19),
+                    ring_point(i, tooth(i)),
+                    ring_point(next, tooth(next)),
+                    ring_point(next, r * 0.19),
+                ],
+                gear_color,
+            );
+        }
+    }
+
     fn draw_panel(&mut self, ui: &mut Ui, screen: Screen, s: Settings) {
         let d = screen
             .density
-            .min(screen.height / 352.0)
+            .min(screen.height / 386.0)
             .min(screen.width / 336.0);
         let text_scale = d / ui.density;
         let p = Rect {
             x: screen.width - 332.0 * d,
-            y: (screen.height - 336.0 * d) * 0.5,
+            y: (screen.height - 370.0 * d) * 0.5,
             w: 322.0 * d,
-            h: 336.0 * d,
+            h: 370.0 * d,
         };
         widgets::plate(ui, p, 11.0 * d, mybezo::PANEL);
         ui.border_px(
@@ -276,7 +290,7 @@ impl Menu {
             p.y + 10.0 * d,
             9.0 * text_scale,
             Face::SemiBold,
-            mybezo::LIME,
+            mybezo::ACCENT,
             "MYBEZO EDITION",
         );
         widgets::text(
@@ -337,7 +351,7 @@ impl Menu {
                 },
                 8.0 * d,
                 if enabled {
-                    mybezo::LIME
+                    mybezo::ACCENT
                 } else {
                     mybezo::RAISED
                 },
@@ -362,6 +376,11 @@ impl Menu {
                 (s.opacity * 100.0 - 10.0) / 90.0,
             ),
             (
+                Slider::GearOpacity,
+                "Gear opacity",
+                (s.gear_opacity * 100.0 - 10.0) / 90.0,
+            ),
+            (
                 Slider::Camera,
                 "Camera sensitivity",
                 (s.camera_sensitivity * 100.0 - 1.0) / 999.0,
@@ -377,7 +396,7 @@ impl Menu {
                 .filter(|drag| drag.kind == kind)
                 .map_or(fraction.clamp(0.0, 1.0), Drag::fraction);
             let value = match kind.value(fraction) {
-                Choice::Opacity(value) => format!("{value}%"),
+                Choice::Opacity(value) | Choice::GearOpacity(value) => format!("{value}%"),
                 Choice::CameraSensitivity(value) => format!("{value}%"),
                 _ => unreachable!(),
             };
@@ -397,9 +416,18 @@ impl Menu {
                 row.y,
                 11.0 * text_scale,
                 Face::SemiBold,
-                mybezo::LIME,
+                mybezo::ACCENT,
                 &value,
             );
+            if kind == Slider::GearOpacity {
+                Self::gear(
+                    ui,
+                    row.x + row.w - value_w - 13.0 * d,
+                    row.y + 7.0 * d,
+                    12.0 * d,
+                    self.opacity_preview(kind, s.gear_opacity),
+                );
+            }
             let y = row.y + 21.0 * d;
             widgets::plate(
                 ui,
@@ -421,7 +449,7 @@ impl Menu {
                         ..row
                     },
                     2.0 * d,
-                    mybezo::LIME,
+                    mybezo::ACCENT,
                 );
             }
             widgets::plate(
@@ -433,7 +461,7 @@ impl Menu {
                     h: 10.0 * d,
                 },
                 5.0 * d,
-                mybezo::LIME,
+                mybezo::ACCENT,
             );
             self.sliders.push((kind, row));
         }
@@ -454,7 +482,7 @@ impl Menu {
                 ui,
                 rect(
                     12.0 + (i % 2) as f32 * 152.0,
-                    264.0 + (i / 2) as f32 * 34.0,
+                    298.0 + (i / 2) as f32 * 34.0,
                     146.0,
                     29.0,
                 ),
@@ -480,9 +508,9 @@ impl Menu {
             r,
             r.h * 0.20,
             if primary {
-                mybezo::LIME
+                mybezo::ACCENT
             } else {
-                hex(0x26372a, 255)
+                mybezo::RAISED
             },
         );
         widgets::centred(
@@ -494,5 +522,96 @@ impl Menu {
             label,
         );
         self.hits.push(choice, r);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> Settings {
+        Settings {
+            gestures: false,
+            gyroscope: false,
+            virtual_mouse: false,
+            camera_sensitivity: 1.0,
+            opacity: 1.0,
+            gear_opacity: 0.5,
+            controls_hidden: false,
+            size: None,
+            fitted: 1.0,
+        }
+    }
+
+    fn screen() -> Screen {
+        Screen {
+            width: 1280.0,
+            height: 720.0,
+            density: 2.0,
+            dark: true,
+        }
+    }
+
+    #[test]
+    fn opacity_sliders_preview_independently_and_release_commits() {
+        let atlas = HudAtlas::boot();
+        let mut batch = HudBatch::new([1280, 720]);
+        let mut menu = Menu::new((0.95, 0.12));
+        menu.open = true;
+        menu.draw(&mut batch, &atlas, screen(), settings());
+
+        let hit = |menu: &Menu, kind| {
+            menu.sliders
+                .iter()
+                .find(|(slider, _)| *slider == kind)
+                .unwrap()
+                .1
+        };
+        let controls = hit(&menu, Slider::Opacity);
+        let y = controls.y + 2.0;
+        assert!(menu.down(4, (controls.x, y), screen()));
+        assert_eq!(menu.preview_controls_opacity(1.0), 0.1);
+        menu.moved(4, (controls.x + controls.w / 2.0, y), screen());
+        let preview = menu.preview_controls_opacity(1.0);
+        assert_eq!(preview, 0.55);
+        assert_eq!(menu.opacity_preview(Slider::GearOpacity, 0.5), 0.5);
+
+        let mut controls_layout = Controls::default_layout();
+        let mut max_alpha = |opacity| {
+            let mut frame = HudBatch::new([1280, 720]);
+            controls_layout.draw(&mut frame, &atlas, true, screen(), opacity);
+            frame
+                .vertices
+                .iter()
+                .map(|vertex| vertex.color >> 24)
+                .max()
+                .unwrap()
+        };
+        assert!(max_alpha(preview) < max_alpha(1.0));
+        assert_eq!(
+            menu.up(4, (controls.x + controls.w / 2.0, y)),
+            Some(Choice::Opacity(55))
+        );
+
+        let gear = hit(&menu, Slider::GearOpacity);
+        assert!(menu.down(5, (gear.x, gear.y + 2.0), screen()));
+        assert_eq!(menu.opacity_preview(Slider::GearOpacity, 0.5), 0.1);
+        assert_eq!(menu.preview_controls_opacity(0.55), 0.55);
+        menu.cancel(5);
+        assert_eq!(menu.opacity_preview(Slider::GearOpacity, 0.5), 0.5);
+    }
+
+    #[test]
+    fn collapsed_gear_draws_only_its_faded_shape() {
+        let atlas = HudAtlas::boot();
+        let mut batch = HudBatch::new([1280, 720]);
+        Menu::new((0.95, 0.12)).draw(&mut batch, &atlas, screen(), settings());
+        assert!(!batch.vertices.is_empty());
+        assert!(
+            batch
+                .vertices
+                .iter()
+                .all(|vertex| vertex.color >> 24 == 128)
+        );
     }
 }

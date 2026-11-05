@@ -224,8 +224,17 @@ impl Launcher {
             events.create_window(Window::default_attributes().with_title("Horizon Android"))?,
         );
         crate::display::prepare(&window)?;
+        let installer = self.home.join("installer");
+        let image = image::load_from_memory(include_bytes!("mybezo-background.jpg"))?.into_rgba8();
+        let (width, height) = image.dimensions();
         let gui = game::UiResources {
-            atlas: HudAtlas::build(&self.home.join("installer"))?,
+            atlas: HudAtlas::build_with_image(
+                &installer,
+                pages::BACKGROUND_SPRITE,
+                width,
+                height,
+                image.into_raw(),
+            )?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces {
                 size: 1,
                 pixels: [0u8; 4].repeat(6),

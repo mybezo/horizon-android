@@ -88,79 +88,45 @@ pub(super) enum Action {
     GpuProfile,
 }
 
-/// A native block landscape behind the Play page, drawn by the same HUD as its buttons.
+pub(super) const BACKGROUND_SPRITE: &str = "mybezo/launcher-background";
+
 fn draw_play_background(ui: &mut Ui, w: f32, h: f32) {
-    use color::hex;
-    let cell = (w / 53.0).min(h / 29.0).max(1.0);
-    let horizon = h * 0.57;
-    let sun = 4.3 * cell;
-    let sx = w * 0.82;
-    let sy = h * 0.41;
-    for (expand, alpha) in [(2.7, 17), (1.7, 28), (0.8, 52), (0.0, 230)] {
-        let edge = expand * cell;
+    let Some(mut source) = ui.atlas.sprites.get(BACKGROUND_SPRITE).copied() else {
+        return;
+    };
+    let aspect = w / h.max(1.0);
+    let image_aspect = source.w as f32 / source.h as f32;
+    if aspect > image_aspect {
+        // Keep the eyes in view when a wider phone crops the top and bottom.
+        let trim = (source.v1 - source.v0) * (1.0 - image_aspect / aspect) * 0.5;
+        source.v0 += trim;
+        source.v1 -= trim;
+    } else {
+        let trim = (source.u1 - source.u0) * (1.0 - aspect / image_aspect) * 0.5;
+        source.u0 += trim;
+        source.u1 -= trim;
+    }
+    let scale = ui.density / ui.batch.scale;
+    ui.batch
+        .rect_uv(0.0, 0.0, w * scale, h * scale, source, u32::MAX);
+
+    // Keep contrast behind the left-hand text and under the launcher tabs.
+    let left = (w * 0.62).max(220.0).min(w);
+    for i in 0..40 {
+        let x = left * i as f32 / 40.0;
+        let alpha = 231u8.saturating_sub(i * 5);
         ui.rounded(
-            sx - edge,
-            sy - edge,
-            sun + 2.0 * edge,
-            sun + 2.0 * edge,
+            x,
             0.0,
-            hex(0xd7f299, alpha),
-        );
-    }
-    for (layer, tint) in [(0, 0x213829), (1, 0x2e4b34), (2, 0x38583a)] {
-        for col in 0..32 {
-            let x = w * 0.34 + col as f32 * w * 0.66 / 32.0;
-            let ridge = ((col * 7 + layer * 11) % 13) as f32 * cell * 0.31;
-            let y = horizon + layer as f32 * cell * 2.1 - ridge;
-            ui.rounded(x, y, w * 0.66 / 32.0 + 1.0, h - y, 0.0, hex(tint, 255));
-        }
-    }
-    let island_x = w * 0.61;
-    let island_y = h * 0.64;
-    for col in 0..18 {
-        let x = island_x + col as f32 * cell;
-        let top = island_y - ((col * 13) % 7) as f32 * cell * 0.29;
-        let depth = (7.0 - (col as f32 - 8.5).abs() * 0.54) * cell;
-        ui.rounded(x, top, cell + 0.5, depth, 0.0, hex(0x26392d, 255));
-        ui.rounded(x, top, cell + 0.5, cell * 0.65, 0.0, hex(0x81a954, 255));
-    }
-    for (col, height) in [(2.0, 3.2), (6.0, 4.7), (10.0, 3.8), (15.0, 4.3)] {
-        let x = island_x + col * cell;
-        let y = island_y - cell * 1.4;
-        ui.rounded(
-            x - cell * 0.18,
-            y - height * cell,
-            cell * 0.36,
-            height * cell,
-            0.0,
-            hex(0x5e5236, 255),
-        );
-        for tier in 0..4 {
-            let width = (0.7 + tier as f32 * 0.61) * cell;
-            ui.rounded(
-                x - width * 0.5,
-                y - height * cell + tier as f32 * cell * 0.65,
-                width,
-                cell * 0.72,
-                0.0,
-                hex(0x5c894b, 255),
-            );
-        }
-    }
-    // Keep the wordmark and account controls readable over the scene.
-    for i in 0..32 {
-        let left = i as f32 * w * 0.77 / 32.0;
-        let alpha = 235 - i * 7;
-        ui.rounded(
-            left,
-            0.0,
-            w * 0.77 / 32.0 + 0.5,
+            left / 40.0 + 0.3,
             h,
             0.0,
-            hex(0x0d1810, alpha),
+            color::hex(0x100817, alpha),
         );
     }
-    ui.rounded(0.0, 0.0, w, 134.0, 0.0, hex(0x0d1810, 212));
+    ui.rounded(0.0, 0.0, w, 134.0, 0.0, color::hex(0x110a19, 195));
+    ui.rounded(0.0, 132.0, w * 0.52, 2.0, 0.0, mybezo::ACCENT);
+    ui.rounded(w * 0.52, 132.0, w * 0.48, 2.0, 0.0, mybezo::WARM);
 }
 
 pub(super) fn button(
@@ -178,7 +144,11 @@ pub(super) fn button(
         w,
         h,
         6.0,
-        if accent { mybezo::LIME } else { mybezo::RAISED },
+        if accent {
+            mybezo::ACCENT
+        } else {
+            mybezo::RAISED
+        },
     );
     let padding = (w * 0.12).clamp(4.0, 12.0);
     let base = if w < 80.0 { 13.0 } else { 16.0 };
@@ -325,7 +295,7 @@ impl Launcher {
         if self.catalog.page == Page::Play {
             draw_play_background(&mut ui, w, h);
         }
-        ui.rounded(20.0, 13.0, 28.0, 28.0, 5.0, mybezo::LIME);
+        ui.rounded(20.0, 13.0, 28.0, 28.0, 5.0, mybezo::ACCENT);
         ui.text(Face::SemiBold, 19.0, 26.0, 15.0, mybezo::INK, "M");
         ui.text(Face::SemiBold, 22.0, 58.0, 11.0, color::TEXT, "Horizon");
         ui.text(
@@ -333,7 +303,7 @@ impl Launcher {
             10.0,
             59.0,
             36.0,
-            mybezo::LIME,
+            mybezo::ACCENT,
             "MYBEZO EDITION",
         );
         button(
@@ -396,7 +366,7 @@ impl Launcher {
                 13.0,
                 32.0,
                 top + 48.0,
-                mybezo::LIME,
+                mybezo::ACCENT,
                 &format!(
                     "JAVA EDITION  •  {}  •  PROFILE {}",
                     horizon_core::VANILLA_VERSION,
@@ -457,7 +427,7 @@ impl Launcher {
                 let bar_y = h - 152.0;
                 ui.rounded(32.0, bar_y, w - 64.0, 4.0, 2.0, color::RAISED);
                 if overall > 0.0 {
-                    ui.rounded(32.0, bar_y, (w - 64.0) * overall, 4.0, 2.0, color::ACCENT);
+                    ui.rounded(32.0, bar_y, (w - 64.0) * overall, 4.0, 2.0, mybezo::ACCENT);
                 }
                 let detail = match progress.stage {
                     InstallStage::Download => format!(

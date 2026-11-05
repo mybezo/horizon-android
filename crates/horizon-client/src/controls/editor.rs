@@ -8,7 +8,7 @@
 //! leaves.
 use super::widgets::{self, Hits, MUTED, PLATE, TEXT};
 use super::*;
-use crate::ui_theme::Face;
+use crate::ui_theme::{Face, color::hex, mybezo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Selected {
@@ -478,7 +478,7 @@ impl Editor {
                 self.sliding = Some((finger, kind, rect));
                 self.slide(
                     kind,
-                    widgets::slider_fraction(rect, at.0, screen.density),
+                    widgets::slider_fraction(rect, at.0, Self::chrome_density(screen)),
                     screen,
                 );
             } else {
@@ -519,7 +519,7 @@ impl Editor {
         {
             self.slide(
                 kind,
-                widgets::slider_fraction(rect, at.0, screen.density),
+                widgets::slider_fraction(rect, at.0, Self::chrome_density(screen)),
                 screen,
             );
             return;
@@ -1190,9 +1190,25 @@ impl Editor {
         Outcome::None
     }
 
-    pub fn draw(&mut self, batch: &mut HudBatch, atlas: &HudAtlas, screen: Screen) {
-        self.controls.draw(batch, atlas, true, screen, 1.0);
+    fn chrome_density(screen: Screen) -> f32 {
+        screen
+            .density
+            .min(screen.width / 450.0)
+            .min(screen.height / 362.0)
+    }
+
+    pub fn draw(&mut self, batch: &mut HudBatch, atlas: &HudAtlas, screen: Screen, opacity: f32) {
+        batch.fill(
+            atlas,
+            0.0,
+            0.0,
+            batch.width,
+            batch.height,
+            hex(0x100918, 58),
+        );
+        self.controls.draw(batch, atlas, true, screen, opacity);
         let mut ui = Ui::new(atlas, batch, (0.0, 0.0));
+        ui.density = Self::chrome_density(screen);
         self.hits.clear();
         let d = screen.density;
         for &(vertical, at) in &self.guides {
@@ -1252,73 +1268,157 @@ impl Editor {
     }
 
     fn toolbar(&mut self, ui: &mut Ui, screen: Screen) {
-        let d = screen.density;
-        let h = 32.0 * d;
-        let layer = self.controls.layout.layers.get(self.layer).map_or_else(
-            || "none".to_owned(),
-            |l| {
-                if l.name.is_empty() {
-                    "layer".into()
-                } else {
-                    l.name.clone()
-                }
-            },
-        );
-        let items: [(String, bool, Action); 6] = [
-            ("Add button".into(), false, Action::AddButton),
-            ("Add text".into(), false, Action::AddText),
-            ("Add joystick".into(), false, Action::AddStick),
-            (
-                format!("Layers ({layer})"),
-                self.layers_open,
-                Action::Layers,
-            ),
-            ("Save".into(), true, Action::Save),
-            ("Exit".into(), false, Action::Exit),
-        ];
-        let widths: Vec<f32> = items
-            .iter()
-            .map(|(l, _, _)| widgets::text_width(ui, 13.0, Face::Medium, l) + h)
-            .collect();
-        let gap = 6.0 * d;
-        let total: f32 = widths.iter().sum::<f32>() + gap * (items.len() - 1) as f32;
-        let mut x = ((screen.width - total) / 2.0).max(8.0 * d);
-        let y = 8.0 * d;
+        let d = ui.density;
         widgets::plate(
             ui,
             Rect {
-                x: x - 6.0 * d,
-                y: y - 6.0 * d,
-                w: total + 12.0 * d,
-                h: h + 12.0 * d,
+                x: 0.0,
+                y: 0.0,
+                w: screen.width,
+                h: 48.0 * d,
             },
-            (h + 12.0 * d) / 2.0,
-            PLATE,
+            0.0,
+            mybezo::PANEL,
         );
-        for ((label, primary, action), w) in items.into_iter().zip(widths) {
+        widgets::plate(
+            ui,
+            Rect {
+                x: 0.0,
+                y: 47.0 * d,
+                w: screen.width,
+                h: d,
+            },
+            0.0,
+            mybezo::BORDER,
+        );
+        widgets::plate(
+            ui,
+            Rect {
+                x: 12.0 * d,
+                y: 10.0 * d,
+                w: 28.0 * d,
+                h: 28.0 * d,
+            },
+            5.0 * d,
+            mybezo::ACCENT,
+        );
+        widgets::centred(
+            ui,
+            Rect {
+                x: 12.0 * d,
+                y: 10.0 * d,
+                w: 28.0 * d,
+                h: 28.0 * d,
+            },
+            16.0,
+            Face::SemiBold,
+            mybezo::INK,
+            "M",
+        );
+        widgets::text(
+            ui,
+            50.0 * d,
+            4.0 * d,
+            16.0,
+            Face::SemiBold,
+            TEXT,
+            "Controller editor",
+        );
+        let layer = self
+            .controls
+            .layout
+            .layers
+            .get(self.layer)
+            .map(|l| l.name.as_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Default");
+        let state = if self.dirty { "Unsaved" } else { "Saved" };
+        let subtitle = ui.fit_text(
+            Face::Regular,
+            10.0,
+            &format!("{layer}  ·  {state}"),
+            (screen.width / d - 228.0).max(40.0),
+        );
+        widgets::text(
+            ui,
+            50.0 * d,
+            26.0 * d,
+            10.0,
+            Face::Regular,
+            MUTED,
+            &subtitle,
+        );
+        for (right, label, primary, action) in [
+            (158.0, "Save layout", true, Action::Save),
+            (64.0, "Exit", false, Action::Exit),
+        ] {
             widgets::button(
                 ui,
                 &mut self.hits,
-                Rect { x, y, w, h },
-                &label,
+                Rect {
+                    x: screen.width - right * d,
+                    y: 9.0 * d,
+                    w: if primary { 88.0 * d } else { 52.0 * d },
+                    h: 30.0 * d,
+                },
+                label,
                 primary,
                 action,
             );
-            x += w + gap;
+        }
+
+        if self.selected.is_some() || self.dialog_open() {
+            return;
+        }
+        let dock = Rect {
+            x: (screen.width - 428.0 * d) / 2.0,
+            y: screen.height - 66.0 * d,
+            w: 428.0 * d,
+            h: 58.0 * d,
+        };
+        widgets::plate(ui, dock, 9.0 * d, PLATE);
+        widgets::text(
+            ui,
+            dock.x + 10.0 * d,
+            dock.y + 4.0 * d,
+            10.0,
+            Face::Medium,
+            mybezo::ACCENT,
+            "ADD TO LAYOUT  /  TAP A CONTROL TO EDIT",
+        );
+        for (i, (label, action)) in [
+            ("+ Button", Action::AddButton),
+            ("+ Text", Action::AddText),
+            ("+ Joystick", Action::AddStick),
+            ("Layers", Action::Layers),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            widgets::button(
+                ui,
+                &mut self.hits,
+                Rect {
+                    x: dock.x + (8.0 + i as f32 * 104.0) * d,
+                    y: dock.y + 23.0 * d,
+                    w: 100.0 * d,
+                    h: 28.0 * d,
+                },
+                label,
+                false,
+                action,
+            );
         }
     }
 
     /// The dialog's frame, on the side the selection is not, and its tabs.
     fn frame(&mut self, ui: &mut Ui, screen: Screen, tabs: &[(Tab, &str)]) -> Rect {
-        let d = screen.density;
-        let w = 360.0 * d;
-        let selected_right = self
-            .selected
-            .map(|s| {
-                let r = self.rect_of(s, screen);
-                r.x + r.w / 2.0 > screen.width / 2.0
-            })
-            .unwrap_or(true);
+        let d = ui.density;
+        let w = (360.0 * d).min(screen.width - 24.0 * d);
+        let selected_right = self.selected.is_none_or(|selected| {
+            let r = self.rect_of(selected, screen);
+            r.x + r.w / 2.0 > screen.width / 2.0
+        });
         let x = if selected_right {
             12.0 * d
         } else {
@@ -1330,30 +1430,59 @@ impl Editor {
             w,
             h: screen.height - 64.0 * d,
         };
-        widgets::plate(ui, r, 12.0 * d, PLATE);
-        let mut tx = r.x + 10.0 * d;
-        let th = 28.0 * d;
-        for &(tab, label) in tabs {
-            tx = widgets::button_at(
+        widgets::plate(ui, r, 8.0 * d, PLATE);
+        let title = match self.selected {
+            Some(Selected::Button(..)) => "Button properties",
+            Some(Selected::Text(..)) => "Text properties",
+            Some(Selected::Stick(..)) => "Joystick properties",
+            None => "Properties",
+        };
+        widgets::text(
+            ui,
+            r.x + 12.0 * d,
+            r.y + 6.0 * d,
+            15.0,
+            Face::SemiBold,
+            TEXT,
+            title,
+        );
+        let tabs_w = (r.w - 24.0 * d) / tabs.len() as f32;
+        for (i, &(tab, label)) in tabs.iter().enumerate() {
+            widgets::button(
                 ui,
                 &mut self.hits,
-                tx,
-                r.y + 10.0 * d,
-                th,
+                Rect {
+                    x: r.x + 12.0 * d + i as f32 * tabs_w,
+                    y: r.y + 31.0 * d,
+                    w: tabs_w - 4.0 * d,
+                    h: 26.0 * d,
+                },
                 label,
                 self.tab == tab,
                 Action::Tab(tab),
-            ) + 4.0 * d;
+            );
         }
+        widgets::plate(
+            ui,
+            Rect {
+                x: r.x + 12.0 * d,
+                y: r.y + 61.0 * d,
+                w: r.w - 24.0 * d,
+                h: d,
+            },
+            0.0,
+            mybezo::BORDER,
+        );
         r
     }
 
     fn row(r: Rect, n: usize, d: f32) -> Rect {
+        let step = ((r.h - 110.0 * d) / 8.0).min(34.0 * d);
         Rect {
             x: r.x + 14.0 * d,
-            y: r.y + 50.0 * d + n as f32 * 34.0 * d,
+            y: r.y + 66.0 * d + n as f32 * step,
             w: r.w - 28.0 * d,
-            h: 30.0 * d,
+            h: step - 2.0 * d,
         }
     }
 
@@ -1454,7 +1583,7 @@ impl Editor {
         let Some(w) = self.selected else {
             return;
         };
-        let d = screen.density;
+        let d = ui.density;
         let tabs: &[(Tab, &str)] = match w {
             Selected::Button(..) => &[
                 (Tab::Basic, "Basic"),
@@ -1880,11 +2009,12 @@ impl Editor {
     }
 
     fn layers(&mut self, ui: &mut Ui, screen: Screen) {
-        let d = screen.density;
+        let d = ui.density;
+        let width = (520.0 * d).min(screen.width - 16.0 * d);
         let r = Rect {
-            x: (screen.width - 520.0 * d) / 2.0,
+            x: (screen.width - width) / 2.0,
             y: 56.0 * d,
-            w: 520.0 * d,
+            w: width,
             h: screen.height - 64.0 * d,
         };
         widgets::plate(ui, r, 12.0 * d, PLATE);
@@ -1924,9 +2054,14 @@ impl Editor {
                 )
             })
             .collect();
-        let max_rows = ((r.h - 100.0 * d) / (34.0 * d)) as usize;
+        let max_rows = ((r.h - 100.0 * d) / (34.0 * d)).max(0.0) as usize;
         for (n, (name, hidden, shows, count)) in layers.into_iter().enumerate().take(max_rows) {
-            let row = Self::row(r, n, d);
+            let row = Rect {
+                x: r.x + 14.0 * d,
+                y: r.y + (50.0 + n as f32 * 34.0) * d,
+                w: r.w - 28.0 * d,
+                h: 30.0 * d,
+            };
             let typing = self.typing == Some(Typing::LayerName(n));
             let title = if typing {
                 format!("{name}|")
@@ -1934,7 +2069,7 @@ impl Editor {
                 format!("{name} ({count})")
             };
             let selected = n == self.layer;
-            let name_w = 150.0 * d;
+            let name_w = row.w * 0.29;
             widgets::button(
                 ui,
                 &mut self.hits,
@@ -1944,6 +2079,7 @@ impl Editor {
                 Action::LayerSelect(n),
             );
             let mut x = row.x + name_w + 6.0 * d;
+            let action_w = (row.w - name_w - 26.0 * d) / 5.0;
             for (label, on, action) in [
                 (
                     if hidden { "Hidden" } else { "Shown" }.to_owned(),
@@ -1963,8 +2099,19 @@ impl Editor {
                 ("Up".to_owned(), false, Action::LayerUp(n)),
                 ("Delete".to_owned(), false, Action::LayerDelete(n)),
             ] {
-                x = widgets::button_at(ui, &mut self.hits, x, row.y, row.h, &label, on, action)
-                    + 4.0 * d;
+                widgets::button(
+                    ui,
+                    &mut self.hits,
+                    Rect {
+                        x,
+                        w: action_w,
+                        ..row
+                    },
+                    &label,
+                    on,
+                    action,
+                );
+                x += action_w + 4.0 * d;
             }
         }
         let row = Rect {
@@ -1984,7 +2131,7 @@ impl Editor {
     }
 
     fn picker(&mut self, ui: &mut Ui, screen: Screen, target: PickFor) {
-        let d = screen.density;
+        let d = ui.density;
         let r = Rect {
             x: 24.0 * d,
             y: 56.0 * d,

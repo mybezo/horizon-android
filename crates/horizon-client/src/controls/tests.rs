@@ -179,7 +179,7 @@ fn the_editor_adds_and_moves_a_button() {
             crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
                 .unwrap();
         let mut batch = HudBatch::new([SCREEN.width as u32, SCREEN.height as u32]);
-        e.draw(&mut batch, &atlas, SCREEN);
+        e.draw(&mut batch, &atlas, SCREEN, 1.0);
     };
     hud(&mut e);
     let before: usize = e.layout().layers[0].normal_buttons.len();

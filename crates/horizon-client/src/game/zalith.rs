@@ -22,6 +22,7 @@ struct State {
     held_keys: std::collections::HashSet<KeyCode>,
     held_buttons: std::collections::HashSet<MouseButton>,
     opacity: f32,
+    gear_opacity: f32,
     hidden: bool,
     virtual_mouse: bool,
     pointer_open: bool,
@@ -43,6 +44,9 @@ impl State {
         let opacity = display["opacity"]
             .as_f64()
             .map_or(1.0, |v| v.clamp(0.1, 1.0) as f32);
+        let gear_opacity = display["gear_opacity"]
+            .as_f64()
+            .map_or(0.85, |v| v.clamp(0.1, 1.0) as f32);
         let size = display["size"].as_f64().map(|v| v.clamp(0.5, 1.2) as f32);
         let hidden = display["hidden"].as_bool().unwrap_or(false);
         let ball = (
@@ -63,6 +67,7 @@ impl State {
             held_keys: Default::default(),
             held_buttons: Default::default(),
             opacity,
+            gear_opacity,
             hidden,
             virtual_mouse: display["virtual_mouse"].as_bool().unwrap_or(true),
             pointer_open: false,
@@ -78,7 +83,7 @@ impl State {
             std::fs::write(
                 &partial,
                 serde_json::to_vec(
-                    &serde_json::json!({"opacity":self.opacity,"size":self.size,"hidden":self.hidden,"virtual_mouse":self.virtual_mouse,"ball":[self.menu.ball.0,self.menu.ball.1]}),
+                    &serde_json::json!({"opacity":self.opacity,"gear_opacity":self.gear_opacity,"size":self.size,"hidden":self.hidden,"virtual_mouse":self.virtual_mouse,"ball":[self.menu.ball.0,self.menu.ball.1]}),
                 )?,
             )?;
             std::fs::rename(partial, path)
@@ -351,14 +356,20 @@ pub(super) fn draw(
             density,
         );
         if let Some(editor) = &mut s.editor {
-            editor.draw(batch, atlas, screen);
+            editor.draw(batch, atlas, screen, s.opacity);
             return;
         }
         s.controls.language = settings.language.replace('_', "-");
         let fitted = s.controls.fitting_size(screen);
         s.controls.size = s.size.unwrap_or(fitted);
         if !s.hidden {
-            s.controls.draw(batch, atlas, playing, screen, s.opacity);
+            s.controls.draw(
+                batch,
+                atlas,
+                playing,
+                screen,
+                s.menu.preview_controls_opacity(s.opacity),
+            );
         }
         s.menu.draw(
             batch,
@@ -368,6 +379,7 @@ pub(super) fn draw(
                 gestures: settings.touch.crosshair_gestures,
                 gyroscope: settings.touch.gyroscope,
                 opacity: s.opacity,
+                gear_opacity: s.gear_opacity,
                 controls_hidden: s.hidden,
                 size: s.size,
                 fitted,
@@ -407,6 +419,10 @@ fn choice(choice: Choice) -> bool {
         }
         Choice::Opacity(value) => {
             with(|s| s.opacity = f32::from(value) / 100.0);
+            true
+        }
+        Choice::GearOpacity(value) => {
+            with(|s| s.gear_opacity = f32::from(value) / 100.0);
             true
         }
         Choice::HideControls => {

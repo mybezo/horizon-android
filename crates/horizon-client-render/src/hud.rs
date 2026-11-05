@@ -346,6 +346,31 @@ impl HudAtlas {
     /// The atlas of a resource root that layers packs over `defaults` (the
     /// game's own resources), whose textures give the sprites' GUI sizes.
     pub fn build_over(root: &Path, defaults: &Path) -> Result<Self> {
+        Self::build_with_extra(root, defaults, None)
+    }
+
+    /// Include an application-owned image in the launcher atlas, without adding it to the game packs.
+    #[cfg(target_os = "android")]
+    pub fn build_with_image(
+        root: &Path,
+        name: &str,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) -> Result<Self> {
+        if width == 0
+            || height == 0
+            || u64::from(width)
+                .checked_mul(u64::from(height))
+                .and_then(|n| n.checked_mul(4))
+                != Some(rgba.len() as u64)
+        {
+            return Err("Invalid launcher image dimensions".into());
+        }
+        Self::build_with_extra(root, root, Some((name.to_owned(), width, height, rgba)))
+    }
+
+    fn build_with_extra(root: &Path, defaults: &Path, extra: Option<PackedImage>) -> Result<Self> {
         let mut atlas = Self::pack(
             root,
             defaults,
@@ -363,6 +388,7 @@ impl HudAtlas {
                 "map",
             ],
             true,
+            extra,
         )?;
         atlas.text_shader = pack_text::load(root, defaults);
         Ok(atlas)
@@ -422,7 +448,7 @@ impl HudAtlas {
     /// holding its textures. The pixels are dropped once the glyph widths are
     /// read, since nothing uploads them.
     pub fn fonts(root: &Path) -> Result<Self> {
-        let mut atlas = Self::pack(root, root, &["font"], false)?;
+        let mut atlas = Self::pack(root, root, &["font"], false, None)?;
         atlas.pixels = Vec::new();
         Ok(atlas)
     }
@@ -649,7 +675,13 @@ impl HudAtlas {
     }
     /// Pack the textures under these folders of `textures/`, and for the
     /// `full` atlas the generated sprites and the run-time slots too.
-    fn pack(root: &Path, defaults: &Path, folders: &[&str], full: bool) -> Result<Self> {
+    fn pack(
+        root: &Path,
+        defaults: &Path,
+        folders: &[&str],
+        full: bool,
+        extra: Option<PackedImage>,
+    ) -> Result<Self> {
         let textures = root.join("assets/minecraft/textures");
         let default_textures =
             (defaults != root).then(|| defaults.join("assets/minecraft/textures"));
@@ -801,6 +833,7 @@ impl HudAtlas {
                 .collect();
             images.push((MISSING_SPRITE.into(), 16, 16, missing));
         }
+        images.extend(extra);
         #[cfg(target_os = "android")]
         let atlas_limit = crate::android_runtime::atlas_limit().min(MAX_ATLAS_SIZE);
         #[cfg(not(target_os = "android"))]
