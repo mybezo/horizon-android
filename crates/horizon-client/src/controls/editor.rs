@@ -1,10 +1,10 @@
 //! The control layout editor, after Zalith Launcher 2's. Every layer shows.
 //! A widget drags where it goes, its edges snapping to the screen's and to
 //! other widgets' with a guide line, and the handle on the selected one's
-//! corner resizes it. A tap selects a widget for its dialog, in Zalith's
+//! corner resizes it. One tap selects a widget and another opens its dialog, with
 //! tabs: Basic (position, size, where it shows), Text, Style and Events for
 //! a button; Basic, Joystick, Directions and Style for a joystick. The
-//! toolbar adds buttons, text and joysticks, opens the layers, saves and
+//! floating gear adds buttons, text and joysticks, opens the layers, saves and
 //! leaves.
 use super::widgets::{self, Hits, MUTED, PLATE, TEXT};
 use super::*;
@@ -62,6 +62,7 @@ enum PickFor {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Action {
+    Properties,
     AddButton,
     AddText,
     AddStick,
@@ -129,6 +130,10 @@ struct Resize {
 pub struct Editor {
     pub controls: Controls,
     selected: Option<Selected>,
+    properties_open: bool,
+    tools_open: bool,
+    gear_position: Option<(f32, f32)>,
+    gear_drag: Option<(u64, (f32, f32), bool)>,
     tab: Tab,
     /// The layer new widgets go to.
     layer: usize,
@@ -313,6 +318,10 @@ const DIRECTIONS: [Direction; 8] = [
     Direction::SouthEast,
 ];
 
+fn overlaps(a: Rect, b: Rect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+
 impl Editor {
     pub fn new(mut controls: Controls) -> Self {
         controls.release_all();
@@ -321,6 +330,10 @@ impl Editor {
         Self {
             controls,
             selected: None,
+            properties_open: false,
+            tools_open: false,
+            gear_position: None,
+            gear_drag: None,
             tab: Tab::Basic,
             layer: 0,
             drag: None,
@@ -348,6 +361,12 @@ impl Editor {
         c.language = self.controls.language;
         c.size = self.controls.size;
         c
+    }
+
+    #[cfg(test)]
+    pub(super) fn gear_at(&self, screen: Screen) -> (f32, f32) {
+        let (x, y, _) = self.gear(screen);
+        (x, y)
     }
 
     /// Where the toolbar's Add button was drawn.
@@ -471,10 +490,15 @@ impl Editor {
     }
 
     fn dialog_open(&self) -> bool {
-        self.picking.is_some() || self.layers_open
+        self.picking.is_some() || self.layers_open || self.properties_open
     }
 
     pub fn down(&mut self, finger: u64, at: (f32, f32), screen: Screen) {
+        if self.gear_drag.is_some() || self.pending.is_some() || self.drag.is_some()
+            || self.resize.is_some() || self.sliding.is_some()
+        {
+            return;
+        }
         if let Some((action, rect)) = self.hits.hit(at) {
             if let Action::Slide(kind) = action {
                 self.sliding = Some((finger, kind, rect));
@@ -491,6 +515,15 @@ impl Editor {
         if self.dialog_open() {
             return;
         }
+        let (x, y, r) = self.gear(screen);
+        if (at.0 - x).hypot(at.1 - y) <= r {
+            self.gear_drag = Some((finger, at, false));
+            return;
+        }
+        if self.tools_open {
+            self.tools_open = false;
+            return;
+        }
         if let Some((x, y, r)) = self.handle(screen)
             && (at.0 - x).hypot(at.1 - y) <= r * 2.0
         {
@@ -503,6 +536,7 @@ impl Editor {
             return;
         }
         let Some(widget) = self.widget_at(at, screen) else {
+            self.select(None);
             return;
         };
         let origin = self.rect_of(widget, screen);
@@ -516,6 +550,15 @@ impl Editor {
     }
 
     pub fn moved(&mut self, finger: u64, at: (f32, f32), screen: Screen) {
+        if let Some((f, start, moved)) = &mut self.gear_drag
+            && *f == finger
+        {
+            *moved |= (at.0 - start.0).hypot(at.1 - start.1) > 6.0 * screen.density;
+            if *moved {
+                self.gear_position = Some((at.0 / screen.width, at.1 / screen.height));
+            }
+            return;
+        }
         if let Some((f, kind, rect)) = self.sliding
             && f == finger
         {
@@ -552,7 +595,23 @@ impl Editor {
         self.place_at(widget, x, y, screen);
     }
 
+    pub fn cancel(&mut self, finger: u64) {
+        self.gear_drag.take_if(|(f, _, _)| *f == finger);
+        self.sliding.take_if(|(f, _, _)| *f == finger);
+        self.pending.take_if(|(f, _)| *f == finger);
+        self.resize.take_if(|resize| resize.finger == finger);
+        if self.drag.take_if(|drag| drag.finger == finger).is_some() {
+            self.guides.clear();
+        }
+    }
+
     pub fn up(&mut self, finger: u64, at: (f32, f32), screen: Screen) -> Outcome {
+        if let Some((_, _, moved)) = self.gear_drag.take_if(|(f, _, _)| *f == finger) {
+            if !moved {
+                self.tools_open = !self.tools_open;
+            }
+            return Outcome::None;
+        }
         if self.sliding.is_some_and(|(f, _, _)| f == finger) {
             self.sliding = None;
             return Outcome::None;
@@ -562,15 +621,17 @@ impl Editor {
         }
         if let Some(drag) = self.drag.take_if(|d| d.finger == finger) {
             self.guides.clear();
-            if !drag.moved {
+            if !drag.moved && self.selected == Some(drag.widget) {
+                self.properties_open = true;
+            } else {
                 self.select(Some(drag.widget));
             }
             return Outcome::None;
         }
-        let Some((f, action)) = self.pending.take() else {
+        let Some((_, action)) = self.pending.take_if(|(f, _)| *f == finger) else {
             return Outcome::None;
         };
-        if f != finger || self.hits.at(at).as_ref() != Some(&action) {
+        if self.hits.at(at).as_ref() != Some(&action) {
             return Outcome::None;
         }
         self.act(action, screen)
@@ -751,6 +812,7 @@ impl Editor {
         if widget != self.selected {
             self.tab = Tab::Basic;
             self.typing = None;
+            self.properties_open = false;
         }
         self.selected = widget;
         self.picking = None;
@@ -838,7 +900,9 @@ impl Editor {
 
     fn act(&mut self, action: Action, screen: Screen) -> Outcome {
         match action {
+            Action::Properties => self.properties_open = self.selected.is_some(),
             Action::AddButton => {
+                self.tools_open = false;
                 self.ensure_layer();
                 let layer = &mut self.controls.layout.layers[self.layer];
                 layer.normal_buttons.push(Button {
@@ -865,6 +929,7 @@ impl Editor {
                 self.select(Some(Selected::Button(self.layer, i)));
             }
             Action::AddText => {
+                self.tools_open = false;
                 self.ensure_layer();
                 let layer = &mut self.controls.layout.layers[self.layer];
                 let mut size = Self::default_size(screen);
@@ -889,6 +954,7 @@ impl Editor {
                 self.select(Some(Selected::Text(self.layer, i)));
             }
             Action::AddStick => {
+                self.tools_open = false;
                 self.ensure_layer();
                 let layer = &mut self.controls.layout.layers[self.layer];
                 layer.joystick_buttons.push(Joystick {
@@ -911,6 +977,7 @@ impl Editor {
                 self.select(Some(Selected::Stick(self.layer, i)));
             }
             Action::Layers => {
+                self.tools_open = false;
                 self.layers_open = !self.layers_open;
                 self.picking = None;
             }
@@ -926,7 +993,7 @@ impl Editor {
                 } else if self.layers_open {
                     self.layers_open = false;
                 } else {
-                    self.select(None);
+                    self.properties_open = false;
                 }
                 if typing {
                     return Outcome::HideKeyboard;
@@ -1124,6 +1191,7 @@ impl Editor {
                 self.select(copy);
             }
             Action::Delete => {
+                self.properties_open = false;
                 let layers = &mut self.controls.layout.layers;
                 match self.selected.take() {
                     Some(Selected::Button(l, i)) => {
@@ -1262,158 +1330,87 @@ impl Editor {
                 );
             }
         }
-        self.toolbar(&mut ui, screen);
         if let Some(target) = self.picking {
             self.picker(&mut ui, screen, target);
         } else if self.layers_open {
             self.layers(&mut ui, screen);
-        } else if self.selected.is_some() {
+        } else if self.properties_open {
             self.dialog(&mut ui, screen);
+        } else {
+            self.toolbar(&mut ui, screen);
         }
         ui.finish();
     }
 
+    fn gear(&self, screen: Screen) -> (f32, f32, f32) {
+        let r = 19.0 * Self::chrome_density(screen);
+        let point = |(x, y): (f32, f32)| {
+            ((x * screen.width).clamp(r, screen.width - r),
+             (y * screen.height).clamp(r, screen.height - r))
+        };
+        let (x, y) = self.gear_position.map(point).unwrap_or_else(|| {
+            let candidates = [(0.5, 0.06), (0.5, 0.94), (0.12, 0.06), (0.88, 0.06), (0.5, 0.5)];
+            candidates.into_iter().map(point).find(|&(x, y)| {
+                let target = Rect { x: x - r, y: y - r, w: 2.0 * r, h: 2.0 * r };
+                !self.all_widgets().into_iter().any(|widget| overlaps(target, self.rect_of(widget, screen)))
+            }).unwrap_or_else(|| point(candidates[0]))
+        });
+        (x, y, r)
+    }
+
     fn toolbar(&mut self, ui: &mut Ui, screen: Screen) {
         let d = ui.density;
-        widgets::plate(
-            ui,
-            Rect {
-                x: 0.0,
-                y: 0.0,
-                w: screen.width,
-                h: 48.0 * d,
-            },
-            0.0,
-            mybezo::PANEL,
-        );
-        widgets::plate(
-            ui,
-            Rect {
-                x: 0.0,
-                y: 47.0 * d,
-                w: screen.width,
-                h: d,
-            },
-            0.0,
-            mybezo::BORDER,
-        );
-        widgets::plate(
-            ui,
-            Rect {
-                x: 12.0 * d,
-                y: 10.0 * d,
-                w: 28.0 * d,
-                h: 28.0 * d,
-            },
-            5.0 * d,
-            mybezo::ACCENT,
-        );
-        widgets::centred(
-            ui,
-            Rect {
-                x: 12.0 * d,
-                y: 10.0 * d,
-                w: 28.0 * d,
-                h: 28.0 * d,
-            },
-            16.0,
-            Face::SemiBold,
-            mybezo::INK,
-            "M",
-        );
-        widgets::text(
-            ui,
-            50.0 * d,
-            4.0 * d,
-            16.0,
-            Face::SemiBold,
-            TEXT,
-            "Controller editor",
-        );
-        let layer = self
-            .controls
-            .layout
-            .layers
-            .get(self.layer)
-            .map(|l| l.name.as_str())
-            .filter(|name| !name.is_empty())
-            .unwrap_or("Default");
-        let state = if self.dirty { "Unsaved" } else { "Saved" };
-        let subtitle = ui.fit_text(
-            Face::Regular,
-            10.0,
-            &format!("{layer}  ·  {state}"),
-            (screen.width / d - 228.0).max(40.0),
-        );
-        widgets::text(
-            ui,
-            50.0 * d,
-            26.0 * d,
-            10.0,
-            Face::Regular,
-            MUTED,
-            &subtitle,
-        );
-        for (right, label, primary, action) in [
-            (158.0, "Save layout", true, Action::Save),
-            (64.0, "Exit", false, Action::Exit),
-        ] {
-            widgets::button(
-                ui,
-                &mut self.hits,
-                Rect {
-                    x: screen.width - right * d,
-                    y: 9.0 * d,
-                    w: if primary { 88.0 * d } else { 52.0 * d },
-                    h: 30.0 * d,
-                },
-                label,
-                primary,
-                action,
-            );
-        }
-
-        if self.selected.is_some() || self.dialog_open() {
+        let (x, y, r) = self.gear(screen);
+        super::menu::Menu::gear(ui, x, y, r * 1.3, 1.0);
+        if self.tools_open {
+            let panel = Rect {
+                x: (x - 118.0 * d).clamp(0.0, screen.width - 236.0 * d),
+                y: if y < screen.height / 2.0 { y + r } else { y - r - 142.0 * d },
+                w: 236.0 * d,
+                h: 142.0 * d,
+            };
+            widgets::plate(ui, panel, 12.0 * d, PLATE);
+            widgets::text(ui, panel.x + 10.0 * d, panel.y + 6.0 * d, 12.0,
+                Face::SemiBold, TEXT, if self.dirty { "Controller editor · Unsaved" } else { "Controller editor" });
+            for (i, (label, action)) in [
+                ("+ Button", Action::AddButton), ("+ Text", Action::AddText),
+                ("+ Joystick", Action::AddStick), ("Layers", Action::Layers),
+                ("Save layout", Action::Save), ("Exit", Action::Exit),
+            ].into_iter().enumerate() {
+                let primary = action == Action::Save;
+                widgets::button(ui, &mut self.hits, Rect {
+                    x: panel.x + (8.0 + (i % 2) as f32 * 112.0) * d,
+                    y: panel.y + (30.0 + (i / 2) as f32 * 34.0) * d,
+                    w: 108.0 * d,
+                    h: 29.0 * d,
+                }, label, primary, action);
+            }
             return;
         }
-        let dock = Rect {
-            x: (screen.width - 428.0 * d) / 2.0,
-            y: screen.height - 66.0 * d,
-            w: 428.0 * d,
-            h: 58.0 * d,
-        };
-        widgets::plate(ui, dock, 9.0 * d, PLATE);
-        widgets::text(
-            ui,
-            dock.x + 10.0 * d,
-            dock.y + 4.0 * d,
-            10.0,
-            Face::Medium,
-            mybezo::ACCENT,
-            "ADD TO LAYOUT  /  TAP A CONTROL TO EDIT",
-        );
-        for (i, (label, action)) in [
-            ("+ Button", Action::AddButton),
-            ("+ Text", Action::AddText),
-            ("+ Joystick", Action::AddStick),
-            ("Layers", Action::Layers),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            widgets::button(
-                ui,
-                &mut self.hits,
-                Rect {
-                    x: dock.x + (8.0 + i as f32 * 104.0) * d,
-                    y: dock.y + 23.0 * d,
-                    w: 100.0 * d,
-                    h: 28.0 * d,
-                },
-                label,
-                false,
-                action,
-            );
+        let Some(selected) = self.selected else { return };
+        if self.drag.is_some() || self.resize.is_some() {
+            return;
+        }
+        let widget = self.rect_of(selected, screen);
+        let width = 192.0 * d;
+        let height = 29.0 * d;
+        let x0 = (widget.x + (widget.w - width) * 0.5).clamp(0.0, screen.width - width);
+        let area = [widget.y - height - 8.0 * d, widget.y + widget.h + 15.0 * d]
+            .into_iter()
+            .map(|y| Rect { x: x0, y, w: width, h: height })
+            .find(|rect| {
+                rect.y >= 0.0 && rect.y + height <= screen.height
+                    && !overlaps(*rect, Rect { x: x - r, y: y - r, w: r * 2.0, h: r * 2.0 })
+                    && !self.all_widgets().into_iter().any(|w| overlaps(*rect, self.rect_of(w, screen)))
+            });
+        if let Some(area) = area {
+            for (i, (label, action)) in [
+                ("Edit", Action::Properties), ("Copy", Action::Duplicate), ("Delete", Action::Delete),
+            ].into_iter().enumerate() {
+                widgets::button(ui, &mut self.hits, Rect {
+                    x: area.x + i as f32 * 65.0 * d, y: area.y, w: 62.0 * d, h: height,
+                }, label, i == 0, action);
+            }
         }
     }
 
@@ -2213,6 +2210,35 @@ impl Editor {
 mod tests {
     use super::*;
     use crate::{ime_edit::editor_changes, osk::Output};
+
+    #[test]
+    fn a_button_at_the_top_edge_selects_before_opening_properties() {
+        let screen = Screen {
+            width: 1280.0,
+            height: 720.0,
+            density: 2.0,
+            dark: true,
+        };
+        let mut editor = Editor::new(Controls::default_layout());
+        editor.act(Action::AddButton, screen);
+        let widget = editor.selected.unwrap();
+        editor.place_at(widget, 520.0, 0.0, screen);
+        editor.select(None);
+
+        let rect = editor.rect_of(widget, screen);
+        let point = (rect.x + rect.w * 0.5, rect.y + rect.h * 0.5);
+        let atlas = HudAtlas::boot();
+        let mut batch = HudBatch::new([1280, 720]);
+        editor.draw(&mut batch, &atlas, screen, 1.0);
+        editor.down(1, point, screen);
+        editor.up(1, point, screen);
+        assert_eq!(editor.selected, Some(widget));
+        assert!(!editor.properties_open);
+
+        editor.down(2, point, screen);
+        editor.up(2, point, screen);
+        assert!(editor.properties_open);
+    }
 
     #[test]
     fn android_keyboard_can_replace_and_clear_the_default_button_label() {

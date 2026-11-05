@@ -183,6 +183,11 @@ fn the_editor_adds_and_moves_a_button() {
     };
     hud(&mut e);
     let before: usize = e.layout().layers[0].normal_buttons.len();
+    assert!(e.add_button_at().is_none(), "the toolbar starts collapsed");
+    let gear = e.gear_at(SCREEN);
+    e.down(9, gear, SCREEN);
+    e.up(9, gear, SCREEN);
+    hud(&mut e);
     let add = e.add_button_at().expect("the toolbar has Add button");
     e.down(9, add, SCREEN);
     e.up(9, add, SCREEN);

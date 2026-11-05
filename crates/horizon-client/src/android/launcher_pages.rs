@@ -12,6 +12,7 @@ use winit::{
 pub(super) enum Action {
     Page(Page),
     Play,
+    SwapHomePanel,
     Search,
     ShaderSource(crate::shader_catalog::Origin),
     ModSource(crate::shader_catalog::Origin),
@@ -131,20 +132,7 @@ fn draw_play_background(ui: &mut Ui, w: f32, h: f32) {
     ui.batch
         .rect_uv(0.0, 0.0, w * scale, h * scale, source, u32::MAX);
 
-    // Keep contrast behind the left-hand card and fade the art into the page.
-    let left = (w * 0.66).max(240.0).min(w);
-    for i in 0..40 {
-        let x = left * i as f32 / 40.0;
-        let alpha = 220u8.saturating_sub(i * 5);
-        ui.rounded(
-            x,
-            0.0,
-            left / 40.0 + 0.3,
-            h,
-            0.0,
-            color::hex(0x100817, alpha),
-        );
-    }
+    ui.rounded(0.0, 0.0, w, h, 0.0, color::hex(0x100817, 67));
     // A soft vignette at the top (under the header) and the bottom (under the footer).
     for i in 0..16u8 {
         let step = i as f32;
@@ -657,8 +645,14 @@ impl Launcher {
         let (w, h) = (ui.w, ui.h);
         ui.rounded(0.0, 0.0, w, h, 0.0, mybezo::BACKGROUND);
         if self.catalog.page == Page::Play {
+            if self.foreground
+                && let Some(patch) = self.motion.patch(&gui.atlas, BACKGROUND_SPRITE)
+            {
+                ui.batch.patches.push(patch);
+            }
             draw_play_background(&mut ui, w, h);
         } else {
+            self.motion.pause();
             draw_backdrop(&mut ui, w, h);
         }
         // Logo badge: a glowing two-tone tile with the monogram.
@@ -684,290 +678,138 @@ impl Launcher {
             mybezo::ACCENT,
             color::hex(0xdab5ff, 34),
         );
-        let account_rect = if w < 700.0 {
-            let width = (w * 0.5).min(230.0);
-            [w - width - 16.0, 12.0, width, 40.0]
-        } else {
-            [w - 320.0, 18.0, 288.0, 46.0]
-        };
-        account_chip(
-            &mut ui,
-            &mut self.targets,
-            account_rect,
-            &self.login.status(&self.catalog.config.name),
-            self.login.signed_in,
-        );
-        let tabs = Page::ALL.len() as f32;
-        let tab_margin = if w < 700.0 { 16.0 } else { 32.0 };
-        let tab_width = (w - 2.0 * tab_margin) / tabs;
-        // The navigation bar: a glass track holding the tabs.
-        card(
-            &mut ui,
-            tab_margin - 5.0,
-            83.0,
-            w - 2.0 * tab_margin + 6.0,
-            52.0,
-            21.0,
-        );
-        for (i, page) in Page::ALL.iter().enumerate() {
-            let x = tab_margin + i as f32 * tab_width;
-            button(
+        if self.catalog.page != Page::Play {
+            let account_rect = if w < 700.0 {
+                let width = (w * 0.5).min(230.0);
+                [w - width - 16.0, 12.0, width, 40.0]
+            } else {
+                [w - 320.0, 18.0, 288.0, 46.0]
+            };
+            account_chip(
                 &mut ui,
                 &mut self.targets,
-                [x, 88.0, tab_width - 4.0, 42.0],
-                if w < 700.0 {
-                    match page {
-                        Page::Installed => "Files",
-                        Page::Settings => "Setup",
-                        _ => page.name(),
-                    }
-                } else {
-                    page.name()
-                },
-                Action::Page(*page),
-                *page == self.catalog.page,
+                account_rect,
+                &self.login.status(&self.catalog.config.name),
+                self.login.signed_in,
             );
+            let tabs = Page::ALL.len() as f32;
+            let tab_margin = if w < 700.0 { 16.0 } else { 32.0 };
+            let tab_width = (w - 2.0 * tab_margin) / tabs;
+            // The navigation bar: a glass track holding the tabs.
+            card(
+                &mut ui,
+                tab_margin - 5.0,
+                83.0,
+                w - 2.0 * tab_margin + 6.0,
+                52.0,
+                21.0,
+            );
+            for (i, page) in Page::ALL.iter().enumerate() {
+                let x = tab_margin + i as f32 * tab_width;
+                button(
+                    &mut ui,
+                    &mut self.targets,
+                    [x, 88.0, tab_width - 4.0, 42.0],
+                    if w < 700.0 {
+                        match page {
+                            Page::Installed => "Files",
+                            Page::Settings => "Setup",
+                            _ => page.name(),
+                        }
+                    } else {
+                        page.name()
+                    },
+                    Action::Page(*page),
+                    *page == self.catalog.page,
+                );
+            }
         }
         let compact = w < 700.0;
         let page = self.catalog.page;
         if page == Page::Play {
             use horizon_client::official_install::InstallStage;
             let installed = horizon_client::official_install::ready(&self.home);
-            let installing = self.worker.is_some();
             let progress = *self.install.lock().unwrap();
-            let top = if h < 340.0 { 150.0 } else { 162.0 };
-            let play_y = h - 124.0;
-            if !installing {
-                // The hero card: title, facts as chips, one line of help.
-                let card_w = (w - 40.0).min(540.0);
-                let wanted: f32 = if h >= 370.0 { 140.0 } else { 104.0 };
-                let card_h = wanted.min(play_y - 14.0 - (top - 14.0)).max(70.0);
-                card(&mut ui, 20.0, top - 14.0, card_w, card_h, 22.0);
-                ui.rounded(20.0, top - 14.0 + 22.0, 3.0, card_h - 44.0, 1.5, mybezo::ACCENT);
+            let installing = self.worker.is_some();
+            let landscape = w >= h && w >= 360.0;
+            let margin = 16.0;
+            let gap = 10.0;
+            let top = 68.0;
+            let area_h = (h - top - 68.0).max(1.0);
+            let panel_w = if landscape { ((w - 42.0) * 0.30).max(164.0) } else { w - 32.0 };
+            let panel_h = if landscape { area_h } else { (area_h * 0.42).min(170.0) };
+            let panel_x = if landscape && !self.home_panel_left { w - margin - panel_w } else { margin };
+            let grid_x = if landscape && self.home_panel_left { margin + panel_w + gap } else { margin };
+            let grid_y = if landscape { top } else { top + panel_h + gap };
+            let grid_w = if landscape { w - 42.0 - panel_w } else { panel_w };
+            let grid_h = if landscape { area_h } else { (area_h - panel_h - gap).max(1.0) };
+
+            card(&mut ui, panel_x, top, panel_w, panel_h, 20.0);
+            let status = self.login.status(&self.catalog.config.name);
+            let account_height = if landscape { (panel_h - 94.0).max(35.0) } else { (panel_h - 76.0).max(25.0) };
+            let avatar = if account_height >= 68.0 { 44.0 } else { 0.0 };
+            let avatar_x = panel_x + (panel_w - avatar) * 0.5;
+            let avatar_y = top + (account_height - avatar - 22.0).max(0.0) * 0.5;
+            if avatar > 0.0 {
+                ui.rounded(avatar_x, avatar_y, avatar, avatar, avatar * 0.5, style::WELL);
+                ui.icon("user", avatar_x + 10.0, avatar_y + 10.0, 24.0, mybezo::ACCENT);
             }
-            ui.text(
-                Face::SemiBold,
-                if installing || h < 340.0 { 28.0 } else { 40.0 },
-                40.0,
-                top - 4.0,
-                color::TEXT,
-                if installing {
-                    "Preparing Minecraft"
-                } else {
-                    "Horizon"
-                },
-            );
-            {
-                let c = &self.catalog.config;
-                let facts = [
-                    format!("Java {}", horizon_core::VANILLA_VERSION),
-                    format!("Profile {}", c.profile),
-                    c.renderer.label().to_owned(),
-                    format!("{}% res", c.render_scale.percent()),
-                ];
-                let mut x = 40.0;
-                let limit = if installing { w - 32.0 } else { 20.0 + (w - 40.0).min(540.0) - 12.0 };
-                for (i, fact) in facts.iter().enumerate() {
-                    let width = ui.measure(Face::Medium, 11.5, fact) + 20.0;
-                    if x + width > limit {
-                        break;
-                    }
-                    x += chip(
-                        &mut ui,
-                        x,
-                        top + 50.0,
-                        fact,
-                        if i == 0 { mybezo::INK } else { mybezo::ACCENT },
-                        if i == 0 {
-                            mybezo::ACCENT
-                        } else {
-                            color::hex(0xdab5ff, 30)
-                        },
-                    ) + 6.0;
-                }
-            }
+            let account_text = ui.fit_text(Face::Medium, 13.0, &status, panel_w - 20.0);
+            let account_width = ui.measure(Face::Medium, 13.0, &account_text);
+            ui.text(Face::Medium, 13.0, panel_x + (panel_w - account_width) * 0.5,
+                avatar_y + avatar, color::TEXT, &account_text);
+            self.targets.push(([panel_x + 8.0, top + 4.0, panel_w - 16.0, account_height - 4.0], Action::Account));
+
+            let play_y = top + panel_h - 45.0;
+            let version = format!("Minecraft {}", horizon_core::VANILLA_VERSION);
+            let version = ui.fit_text(Face::Medium, 13.0, &version, panel_w - 24.0);
+            ui.text(Face::Medium, 13.0, panel_x + 12.0, play_y - 23.0, style::TEXT_SOFT, &version);
             if installing {
-                let current = InstallStage::ALL
-                    .iter()
-                    .position(|s| *s == progress.stage)
-                    .unwrap_or(0);
-                let row_height = ((h - 360.0) / 6.0).clamp(25.0, 40.0);
-                if h >= 620.0 {
-                    for (index, stage) in InstallStage::ALL.iter().enumerate() {
-                        let y = top + 90.0 + index as f32 * row_height;
-                        // A step marker: a check when done, a lit dot for the current step.
-                        if index < current {
-                            ui.rounded(32.0, y + 2.0, 20.0, 20.0, 10.0, color::hex(0x45c27a, 60));
-                            ui.icon("check", 34.0, y + 4.0, 16.0, style::SUCCESS);
-                        } else if index == current {
-                            ui.rounded(30.0, y, 24.0, 24.0, 12.0, style::GLOW);
-                            ui.rounded(34.0, y + 4.0, 16.0, 16.0, 8.0, mybezo::ACCENT);
-                        } else {
-                            ui.border(34.0, y + 4.0, 16.0, 16.0, 8.0, style::LINE);
-                        }
-                        ui.text(
-                            Face::Regular,
-                            16.0,
-                            64.0,
-                            y,
-                            if index == current {
-                                color::TEXT
-                            } else {
-                                color::MUTED
-                            },
-                            &format!("{:02}  {}", index + 1, stage.label()),
-                        );
-                    }
-                } else {
-                    ui.text(
-                        Face::Regular,
-                        18.0,
-                        32.0,
-                        top + 100.0,
-                        color::TEXT,
-                        progress.stage.label(),
-                    );
-                    ui.text(
-                        Face::Regular,
-                        15.0,
-                        32.0,
-                        top + 138.0,
-                        color::MUTED,
-                        &format!("Step {} of 6", current + 1),
-                    );
-                }
+                let step = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
                 let fraction = if progress.total > 0 {
-                    progress.done as f32 / progress.total as f32
-                } else {
-                    0.0
-                };
-                let overall = (current as f32 + fraction.clamp(0.0, 1.0)) / 6.0;
-                let bar_y = h - 152.0;
-                let bar_w = w - 64.0;
-                ui.rounded(32.0, bar_y, bar_w, 10.0, 5.0, style::WELL);
-                ui.border(32.0, bar_y, bar_w, 10.0, 5.0, style::LINE_SOFT);
-                if overall > 0.0 {
-                    let fill = (bar_w * overall).max(10.0);
-                    ui.rounded(32.0, bar_y - 2.0, fill, 14.0, 7.0, style::GLOW_SOFT);
-                    ui.rounded(32.0, bar_y, fill, 10.0, 5.0, mybezo::WARM);
-                    ui.rounded(32.0, bar_y, fill, 8.0, 4.0, mybezo::ACCENT);
-                }
-                let percent = format!("{:.0}%", overall * 100.0);
-                let percent_w = ui.measure(Face::Mono, 13.0, &percent);
-                ui.text(
-                    Face::Mono,
-                    13.0,
-                    32.0 + bar_w - percent_w,
-                    bar_y - 24.0,
-                    mybezo::ACCENT,
-                    &percent,
-                );
-                let detail = match progress.stage {
-                    InstallStage::Download => format!(
-                        "{:.1} / {:.1} MiB  - verified downloads",
-                        progress.done as f64 / 1048576.0,
-                        progress.total as f64 / 1048576.0
-                    ),
-                    InstallStage::Controls => format!(
-                        "{} / {} control files verified",
-                        progress.done, progress.total
-                    ),
-                    _ => "Please keep Horizon open. Downloaded files are kept for retry.".into(),
-                };
-                let detail = ui.fit_text(Face::Regular, 14.0, &detail, w - 64.0);
-                ui.text(
-                    Face::Regular,
-                    14.0,
-                    32.0,
-                    bar_y + 16.0,
-                    color::MUTED,
-                    &detail,
-                );
-            } else if h >= 370.0 {
-                ui.text(
-                    Face::Regular,
-                    15.0,
-                    40.0,
-                    top + 86.0,
-                    style::TEXT_SOFT,
-                    if installed {
-                        "Your worlds and Java servers"
-                    } else {
-                        "Set up Minecraft on this device"
-                    },
-                );
-            }
-            if installing {
-                ui.text(
-                    Face::Medium,
-                    19.0,
-                    32.0,
-                    h - 96.0,
-                    color::TEXT,
-                    progress.stage.label(),
-                );
+                    (progress.done as f32 / progress.total as f32).clamp(0.0, 1.0)
+                } else { 0.0 };
+                let overall = (step as f32 + fraction) / InstallStage::ALL.len() as f32;
+                let label = ui.fit_text(Face::Medium, 12.0, progress.stage.label(), panel_w - 24.0);
+                ui.text(Face::Medium, 12.0, panel_x + 12.0, play_y, color::TEXT, &label);
+                ui.rounded(panel_x + 12.0, play_y + 23.0, panel_w - 24.0, 5.0, 2.5, style::WELL);
+                ui.rounded(panel_x + 12.0, play_y + 23.0, (panel_w - 24.0) * overall, 5.0, 2.5, mybezo::ACCENT);
             } else {
-                button(
-                    &mut ui,
-                    &mut self.targets,
-                    [32.0, play_y, (w - 64.0).min(300.0), 58.0],
-                    if installed {
-                        "Play"
-                    } else if self.error.is_some() {
-                        "Retry installation"
-                    } else {
-                        "Download Minecraft 26.3"
-                    },
-                    Action::Play,
-                    true,
-                );
-                // An overview of what this phone has on, beside the art.
-                if w >= 760.0 && h >= 470.0 {
-                    let (cw, ch): (f32, f32) = (300.0, 116.0);
-                    let (cx, cy) = (w - cw - 32.0, h - 66.0 - ch);
-                    card(&mut ui, cx, cy, cw, ch, 18.0);
-                    ui.text(
-                        Face::Medium,
-                        11.5,
-                        cx + 16.0,
-                        cy + 10.0,
-                        mybezo::ACCENT,
-                        "OVERVIEW",
-                    );
-                    let bundled = horizon_client::mod_list::ANDROID_BUNDLED.len();
-                    let rows = [
-                        (
-                            "zap",
-                            "Built-in mods",
-                            format!("{} / {bundled} on", self.catalog.bundled_enabled.len()),
-                        ),
-                        (
-                            "archive",
-                            "Installed content",
-                            self.catalog.local.len().to_string(),
-                        ),
-                        (
-                            "monitor",
-                            "Renderer",
-                            self.catalog.config.renderer.label().to_owned(),
-                        ),
-                    ];
-                    for (i, (icon, title, value)) in rows.iter().enumerate() {
-                        let ry = cy + 34.0 + i as f32 * 26.0;
-                        ui.icon(icon, cx + 16.0, ry + 2.0, 16.0, style::TEXT_SOFT);
-                        ui.text(Face::Regular, 13.5, cx + 40.0, ry, style::TEXT_SOFT, title);
-                        let value = ui.fit_text(Face::Medium, 13.5, value, cw * 0.45);
-                        let vw = ui.measure(Face::Medium, 13.5, &value);
-                        ui.text(
-                            Face::Medium,
-                            13.5,
-                            cx + cw - 16.0 - vw,
-                            ry,
-                            color::TEXT,
-                            &value,
-                        );
-                    }
+                button(&mut ui, &mut self.targets, [panel_x + 8.0, play_y, panel_w - 16.0, 36.0],
+                    if installed { "Launch Game" } else if self.error.is_some() { "Retry installation" } else { "Download Minecraft" },
+                    Action::Play, true);
+            }
+            if landscape {
+                button(&mut ui, &mut self.targets, [w - 142.0, 13.0, 126.0, 36.0],
+                    if self.home_panel_left { "Panel →" } else { "← Panel" },
+                    Action::SwapHomePanel, false);
+            }
+
+            let columns = if grid_w >= 485.0 { 3 } else { 2 };
+            let rows = 6 / columns;
+            let tile_w = (grid_w - gap * (columns - 1) as f32) / columns as f32;
+            let tile_h = ((grid_h - gap * (rows - 1) as f32) / rows as f32).max(24.0);
+            let details = [
+                (Page::Installed, "Manage local content"),
+                (Page::Settings, "Graphics, device and input"),
+                (Page::Skins, "Skins and capes"),
+                (Page::Mods, "Browse Horizon mods"),
+                (Page::Packs, "Browse resource packs"),
+                (Page::Shaders, "Browse shader packs"),
+            ];
+            for (i, (target, detail)) in details.into_iter().enumerate() {
+                let x = grid_x + (i % columns) as f32 * (tile_w + gap);
+                let y = grid_y + (i / columns) as f32 * (tile_h + gap);
+                card(&mut ui, x, y, tile_w, tile_h, 14.0);
+                let icon_y = if tile_h >= 57.0 { y + 10.0 } else { y + (tile_h - 16.0) * 0.5 };
+                ui.icon(page_icon(target), x + 10.0, icon_y, 16.0, mybezo::ACCENT);
+                let title = ui.fit_text(Face::SemiBold, 13.0, target.name(), tile_w - 45.0);
+                ui.text(Face::SemiBold, 13.0, x + 34.0, icon_y - 2.0, color::TEXT, &title);
+                if tile_h >= 57.0 {
+                    let detail = ui.fit_text(Face::Regular, 11.0, detail, tile_w - 20.0);
+                    ui.text(Face::Regular, 11.0, x + 10.0, y + 33.0, style::TEXT_SOFT, &detail);
                 }
+                self.targets.push(([x, y, tile_w, tile_h], Action::Page(target)));
             }
         } else if page == Page::Skins {
             self.wardrobe
@@ -1838,6 +1680,7 @@ impl Launcher {
         ui.finish();
 
         if !r.render(&game::loading_frame(&b))? && !b.patches.is_empty() {
+            self.motion.invalidate();
             // A suspended/lost surface skips the frame, including its glyph
             // uploads. Rebuild them next time instead of caching invisible text.
             horizon_client::ui_theme::reset_atlas();
@@ -2154,6 +1997,10 @@ impl Launcher {
                 self.refresh_wardrobe_account();
             }
             Some(Action::LoginLink) => self.login.open_link(),
+            Some(Action::SwapHomePanel) => {
+                self.home_panel_left = !self.home_panel_left;
+                self.focus = None;
+            }
             Some(Action::Page(page)) => {
                 if page == Page::Skins {
                     self.wardrobe.open(
@@ -2391,8 +2238,28 @@ impl Launcher {
                 }
             }
             TouchPhase::Ended => {
-                if self.drag.take().is_some_and(|drag| !drag.moved) {
-                    self.activate(events)?;
+                if let Some(drag) = self.drag.take() {
+                    if !drag.moved {
+                        self.activate(events)?;
+                    } else if self.catalog.page == Page::Play
+                        && !self.login.visible
+                        && self.chooser.is_none()
+                        && !self.exit_confirmation
+                    {
+                        let density = f64::from(self.ui_density());
+                        let [x, y] = drag.origin();
+                        let dx = t.location.x - x;
+                        let dy = t.location.y - y;
+                        let can_swap = self.targets.iter().any(|(_, action)| *action == Action::SwapHomePanel);
+                        let from_account = self.targets.iter().any(|([left, top, w, h], action)| {
+                            let (x, y) = ((x / density) as f32, (y / density) as f32);
+                            *action == Action::Account && x >= *left && x <= *left + *w
+                                && y >= *top && y <= *top + *h
+                        });
+                        if can_swap && from_account && dx.abs() > (42.0 * density).max(dy.abs()) {
+                            self.home_panel_left = dx < 0.0;
+                        }
+                    }
                 }
             }
             TouchPhase::Cancelled => {

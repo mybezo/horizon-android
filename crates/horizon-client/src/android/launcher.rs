@@ -5,6 +5,8 @@ use crate::game;
 mod chooser;
 #[path = "launcher_gesture.rs"]
 mod gesture;
+#[path = "launcher_motion.rs"]
+mod motion;
 #[path = "login.rs"]
 mod login;
 #[path = "launcher_pages.rs"]
@@ -44,6 +46,9 @@ pub(super) struct Launcher {
     pub(super) audio: Option<horizon_client::audio::Audio>,
     game: Option<Box<dyn ApplicationHandler>>,
     cursor: (f64, f64),
+    foreground: bool,
+    motion: motion::Motion,
+    home_panel_left: bool,
     mouse_down: bool,
     feedback: Option<(pages::Action, Instant)>,
     install: Arc<Mutex<horizon_client::official_install::InstallProgress>>,
@@ -124,6 +129,9 @@ impl Launcher {
             gui: None,
             audio: None,
             game: None,
+            foreground: false,
+            motion: motion::Motion::new(),
+            home_panel_left: false,
             cursor: (0.0, 0.0),
             mouse_down: false,
             feedback: None,
@@ -225,7 +233,9 @@ impl Launcher {
         );
         crate::display::prepare(&window)?;
         let installer = self.home.join("installer");
-        let image = image::load_from_memory(include_bytes!("mybezo-background.jpg"))?.into_rgba8();
+        let image = image::load_from_memory(include_bytes!("mybezo-background.jpg"))?
+            .resize_exact(480, 270, image::imageops::FilterType::Triangle)
+            .into_rgba8();
         let (width, height) = image.dimensions();
         let gui = game::UiResources {
             atlas: HudAtlas::build_with_image(
@@ -253,6 +263,7 @@ impl Launcher {
             },
         )?);
         self.window = Some(window);
+        self.motion.invalidate();
         self.gui = Some(gui);
         Ok(())
     }
@@ -422,6 +433,7 @@ impl Launcher {
             self.renderer = None;
             self.window = None;
             self.gui = None;
+            self.motion.pause();
             horizon_client::ui_theme::reset_atlas();
             self.game = Some(game);
             self.game.as_mut().unwrap().resumed(events);
@@ -458,6 +470,7 @@ impl Launcher {
 
 impl ApplicationHandler for Launcher {
     fn resumed(&mut self, events: &ActiveEventLoop) {
+        self.foreground = true;
         self.configure_screen();
         if let Some(game) = &mut self.game {
             return game.resumed(events);
@@ -468,6 +481,8 @@ impl ApplicationHandler for Launcher {
         }
     }
     fn suspended(&mut self, events: &ActiveEventLoop) {
+        self.foreground = false;
+        self.motion.pause();
         crate::diagnostics::heartbeat("suspended", || serde_json::json!({}));
         if let Some(game) = &mut self.game {
             return game.suspended(events);
@@ -485,6 +500,7 @@ impl ApplicationHandler for Launcher {
             let _ = crate::native_ime::viewport_bottom();
         }
         if matches!(event, WindowEvent::Focused(true)) {
+            self.foreground = true;
             self.configure_screen();
         }
         if let Some(game) = &mut self.game {
@@ -511,6 +527,8 @@ impl ApplicationHandler for Launcher {
             }
             WindowEvent::Touch(touch) => self.touch_event(events, touch),
             WindowEvent::Focused(false) => {
+                self.foreground = false;
+                self.motion.pause();
                 crate::diagnostics::heartbeat("launcher_background", || serde_json::json!({}));
                 horizon_client::android_runtime::clear_gamepads();
                 self.controller_repeat = None;
@@ -717,8 +735,13 @@ impl ApplicationHandler for Launcher {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
+        let redraw_ms = if self.foreground && self.catalog.page == Page::Play {
+            motion::FRAME_MS
+        } else {
+            100
+        };
         events.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(100),
+            Instant::now() + Duration::from_millis(redraw_ms),
         ));
     }
     fn exiting(&mut self, events: &ActiveEventLoop) {

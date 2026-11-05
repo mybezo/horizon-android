@@ -58,6 +58,19 @@ impl Slider {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Tab {
+    Controls,
+    Input,
+    Display,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Target {
+    Choose(Choice),
+    Tab(Tab),
+}
+
 struct Drag {
     finger: u64,
     kind: Slider,
@@ -75,10 +88,11 @@ pub struct Menu {
     /// The ball's centre as a share of the screen.
     pub ball: (f32, f32),
     pub open: bool,
-    hits: Hits<Choice>,
+    tab: Tab,
+    hits: Hits<Target>,
     /// A finger on the ball: where it landed, and whether it dragged.
     on_ball: Option<(u64, (f32, f32), bool)>,
-    pending: Option<(u64, Choice)>,
+    pending: Option<(u64, Target)>,
     sliders: Vec<(Slider, Rect)>,
     drag: Option<Drag>,
 }
@@ -88,6 +102,7 @@ impl Menu {
         Self {
             ball,
             open: false,
+            tab: Tab::Controls,
             hits: Hits::new(),
             on_ball: None,
             pending: None,
@@ -176,7 +191,16 @@ impl Menu {
             return None;
         }
         self.pending = None;
-        (self.hits.at(at) == Some(choice)).then_some(choice)
+        if self.hits.at(at) != Some(choice) {
+            return None;
+        }
+        match choice {
+            Target::Choose(choice) => Some(choice),
+            Target::Tab(tab) => {
+                self.tab = tab;
+                None
+            }
+        }
     }
 
     pub fn cancel(&mut self, finger: u64) {
@@ -227,7 +251,7 @@ impl Menu {
         ui.finish();
     }
 
-    fn gear(ui: &mut Ui, x: f32, y: f32, r: f32, opacity: f32) {
+    pub(super) fn gear(ui: &mut Ui, x: f32, y: f32, r: f32, opacity: f32) {
         let gear_color = with_alpha(mybezo::ACCENT, opacity);
         let scale = ui.batch.scale;
         let atlas = ui.atlas;
@@ -259,14 +283,14 @@ impl Menu {
     fn draw_panel(&mut self, ui: &mut Ui, screen: Screen, s: Settings) {
         let d = screen
             .density
-            .min(screen.height / 386.0)
+            .min(screen.height / 276.0)
             .min(screen.width / 336.0);
         let text_scale = d / ui.density;
         let p = Rect {
             x: screen.width - 332.0 * d,
-            y: (screen.height - 370.0 * d) * 0.5,
+            y: (screen.height - 260.0 * d) * 0.5,
             w: 322.0 * d,
-            h: 370.0 * d,
+            h: 260.0 * d,
         };
         widgets::plate(ui, p, 11.0 * d, mybezo::PANEL);
         ui.border_px(
@@ -300,36 +324,49 @@ impl Menu {
             18.0 * text_scale,
             Face::SemiBold,
             TEXT,
-            "Quick controls",
+            "Game tools",
         );
         let close = rect(276.0, 8.0, 34.0, 34.0);
         self.action(ui, close, "×", Choice::Close, false, text_scale);
-        for (index, (label, choice)) in [
+        for (i, (label, tab)) in [
+            ("Controls", Tab::Controls), ("Mouse & keys", Tab::Input), ("Display", Tab::Display),
+        ].into_iter().enumerate() {
+            widgets::button(ui, &mut self.hits,
+                rect(12.0 + i as f32 * 101.0, 51.0, 96.0, 30.0),
+                label, self.tab == tab, Target::Tab(tab));
+        }
+        let size = match s.size {
+            Some(size) => format!("Size {:.0}%", size * 100.0),
+            None => format!("Size auto {:.0}%", s.fitted * 100.0),
+        };
+        let control_actions = [
             ("Edit controls", Choice::EditControls),
             ("Import layout", Choice::ImportControls),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            self.action(
-                ui,
-                rect(12.0 + index as f32 * 152.0, 51.0, 146.0, 32.0),
-                label,
-                choice,
-                index == 0,
-                text_scale,
-            );
+            (size.as_str(), Choice::Size),
+        ];
+        let actions: &[(&str, Choice)] = match self.tab {
+            Tab::Controls => &control_actions,
+            Tab::Input => &[("Keyboard", Choice::Keyboard)],
+            Tab::Display => &[("Pause", Choice::Pause), ("Minimize", Choice::Minimize)],
+        };
+        for (i, &(label, choice)) in actions.iter().enumerate() {
+            self.action(ui, rect(12.0 + (i % 2) as f32 * 152.0, 91.0 + (i / 2) as f32 * 34.0,
+                146.0, 30.0), label, choice, choice == Choice::EditControls, text_scale);
         }
-        for (index, (label, enabled, choice)) in [
-            ("Virtual pointer", s.virtual_mouse, Choice::VirtualMouse),
-            ("Show controls", !s.controls_hidden, Choice::HideControls),
+        let control_toggles = [
             ("Gestures", s.gestures, Choice::Gestures),
             ("Gyroscope", s.gyroscope, Choice::Gyroscope),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let row = rect(12.0, 90.0 + index as f32 * 26.0, 298.0, 25.0);
+        ];
+        let input_toggles = [("Virtual pointer", s.virtual_mouse, Choice::VirtualMouse)];
+        let display_toggles = [("Show controls", !s.controls_hidden, Choice::HideControls)];
+        let toggles: &[(&str, bool, Choice)] = match self.tab {
+            Tab::Controls => &control_toggles,
+            Tab::Input => &input_toggles,
+            Tab::Display => &display_toggles,
+        };
+        for (index, &(label, enabled, choice)) in toggles.iter().enumerate() {
+            let top = if self.tab == Tab::Controls { 161.0 } else { 128.0 };
+            let row = rect(12.0, top + index as f32 * 29.0, 298.0, 25.0);
             widgets::text(
                 ui,
                 row.x + 3.0 * d,
@@ -367,29 +404,24 @@ impl Menu {
                 6.0 * d,
                 if enabled { mybezo::INK } else { MUTED },
             );
-            self.hits.push(choice, row);
+            self.hits.push(Target::Choose(choice), row);
         }
-        for (index, (kind, name, fraction)) in [
-            (
-                Slider::Opacity,
-                "Controls opacity",
-                (s.opacity * 100.0 - 10.0) / 90.0,
-            ),
-            (
-                Slider::GearOpacity,
-                "Gear opacity",
-                (s.gear_opacity * 100.0 - 10.0) / 90.0,
-            ),
-            (
-                Slider::Camera,
-                "Camera sensitivity",
-                (s.camera_sensitivity * 100.0 - 1.0) / 999.0,
-            ),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let row = rect(15.0, 195.0 + index as f32 * 34.0, 292.0, 33.0);
+        let input_sliders = [(
+            Slider::Camera,
+            "Camera sensitivity",
+            (s.camera_sensitivity * 100.0 - 1.0) / 999.0,
+        )];
+        let display_sliders = [
+            (Slider::Opacity, "Controls opacity", (s.opacity * 100.0 - 10.0) / 90.0),
+            (Slider::GearOpacity, "Gear opacity", (s.gear_opacity * 100.0 - 10.0) / 90.0),
+        ];
+        let sliders: &[(Slider, &str, f32)] = match self.tab {
+            Tab::Controls => &[],
+            Tab::Input => &input_sliders,
+            Tab::Display => &display_sliders,
+        };
+        for (index, &(kind, name, fraction)) in sliders.iter().enumerate() {
+            let row = rect(15.0, 165.0 + index as f32 * 37.0, 292.0, 33.0);
             let fraction = self
                 .drag
                 .as_ref()
@@ -465,33 +497,6 @@ impl Menu {
             );
             self.sliders.push((kind, row));
         }
-        let size = match s.size {
-            Some(size) => format!("Size {:.0}%", size * 100.0),
-            None => format!("Size auto {:.0}%", s.fitted * 100.0),
-        };
-        for (i, (label, choice)) in [
-            (size.as_str(), Choice::Size),
-            ("Keyboard", Choice::Keyboard),
-            ("Pause", Choice::Pause),
-            ("Minimize", Choice::Minimize),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            self.action(
-                ui,
-                rect(
-                    12.0 + (i % 2) as f32 * 152.0,
-                    298.0 + (i / 2) as f32 * 34.0,
-                    146.0,
-                    29.0,
-                ),
-                label,
-                choice,
-                false,
-                text_scale,
-            );
-        }
     }
 
     fn action(
@@ -521,7 +526,7 @@ impl Menu {
             if primary { mybezo::INK } else { TEXT },
             label,
         );
-        self.hits.push(choice, r);
+        self.hits.push(Target::Choose(choice), r);
     }
 }
 
@@ -558,6 +563,7 @@ mod tests {
         let mut batch = HudBatch::new([1280, 720]);
         let mut menu = Menu::new((0.95, 0.12));
         menu.open = true;
+        menu.tab = Tab::Display;
         menu.draw(&mut batch, &atlas, screen(), settings());
 
         let hit = |menu: &Menu, kind| {

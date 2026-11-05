@@ -213,7 +213,10 @@ pub(super) fn touch(t: &Touch, size: [u32; 2], density: f32, playing: bool) -> b
                     Outcome::None
                 }
                 TouchPhase::Ended => editor.up(t.id, at, screen),
-                TouchPhase::Cancelled => Outcome::None,
+                TouchPhase::Cancelled => {
+                    editor.cancel(t.id);
+                    Outcome::None
+                }
             };
             match outcome {
                 Outcome::ShowKeyboard(text) => crate::platform::show(&text),
