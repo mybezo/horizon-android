@@ -165,6 +165,7 @@ impl Config {
 #[derive(Clone, Copy, PartialEq)]
 pub enum Page {
     Play,
+    Game,
     Mods,
     Packs,
     Shaders,
@@ -173,24 +174,16 @@ pub enum Page {
     Skins,
 }
 impl Page {
-    pub const ALL: [Self; 7] = [
-        Self::Play,
-        Self::Mods,
-        Self::Packs,
-        Self::Shaders,
-        Self::Installed,
-        Self::Settings,
-        Self::Skins,
-    ];
     pub fn name(self) -> &'static str {
         match self {
-            Self::Play => "Play",
-            Self::Mods => "Mods",
-            Self::Packs => "Packs",
+            Self::Play => "Beranda",
+            Self::Game => "Game",
+            Self::Mods => "Mod",
+            Self::Packs => "Resource Pack",
             Self::Shaders => "Shaders",
-            Self::Installed => "Installed",
-            Self::Settings => "Settings",
-            Self::Skins => "Skins",
+            Self::Installed => "Terpasang",
+            Self::Settings => "Pengaturan",
+            Self::Skins => "Skin & Jubah",
         }
     }
     pub fn is_catalog(self) -> bool {

@@ -48,7 +48,7 @@ pub(super) struct Launcher {
     cursor: (f64, f64),
     foreground: bool,
     motion: motion::Motion,
-    home_panel_left: bool,
+    settings_section: pages::SettingsSection,
     mouse_down: bool,
     feedback: Option<(pages::Action, Instant)>,
     install: Arc<Mutex<horizon_client::official_install::InstallProgress>>,
@@ -131,7 +131,7 @@ impl Launcher {
             game: None,
             foreground: false,
             motion: motion::Motion::new(),
-            home_panel_left: false,
+            settings_section: pages::SettingsSection::Renderer,
             cursor: (0.0, 0.0),
             mouse_down: false,
             feedback: None,
@@ -277,7 +277,12 @@ impl Launcher {
         } else if self.chooser.take().is_some() {
             // Back dismisses the current dialog, including the exit question.
         } else if self.catalog.editing.take().is_none() {
-            self.exit_confirmation = true;
+            if self.catalog.page == Page::Play {
+                self.exit_confirmation = true;
+            } else {
+                self.catalog.page = Page::Play;
+                self.catalog.scroll = 0.0;
+            }
         }
         self.focus = None;
         self.pending_focus = self.exit_confirmation.then_some(pages::Action::Dismiss);

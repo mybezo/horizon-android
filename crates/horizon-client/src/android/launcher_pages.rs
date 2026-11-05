@@ -12,7 +12,8 @@ use winit::{
 pub(super) enum Action {
     Page(Page),
     Play,
-    SwapHomePanel,
+    Back,
+    SettingsSection(SettingsSection),
     Search,
     ShaderSource(crate::shader_catalog::Origin),
     ModSource(crate::shader_catalog::Origin),
@@ -142,20 +143,6 @@ fn draw_play_background(ui: &mut Ui, w: f32, h: f32) {
     }
 }
 
-/// The pages without art: a violet haze behind the header fading into the page.
-fn draw_backdrop(ui: &mut Ui, w: f32, h: f32) {
-    for i in 0..24u8 {
-        let step = i as f32;
-        let alpha = 70u8.saturating_sub(i * 3);
-        ui.rounded(0.0, step * 8.0, w, 8.0, 0.0, color::hex(0x2c1846, alpha));
-    }
-    for i in 0..12u8 {
-        let step = i as f32;
-        let alpha = 26u8.saturating_sub(i * 2);
-        ui.rounded(0.0, h - (step + 1.0) * 10.0, w, 10.0, 0.0, color::hex(0x3a1530, alpha));
-    }
-}
-
 /// A glass card: shadow, translucent plate, hairline border and a top sheen.
 pub(super) fn card(ui: &mut Ui, x: f32, y: f32, w: f32, h: f32, radius: f32) {
     ui.rounded(x, y + 4.0, w, h, radius, style::SHADOW);
@@ -212,6 +199,7 @@ fn action_icon(action: Action) -> Option<&'static str> {
 fn page_icon(page: Page) -> &'static str {
     match page {
         Page::Play => "home",
+        Page::Game => "gamepad",
         Page::Mods => "package",
         Page::Packs => "image",
         Page::Shaders => "zap",
@@ -221,21 +209,115 @@ fn page_icon(page: Page) -> &'static str {
     }
 }
 
-/// The icon in front of a launch setting.
-fn setting_icon(action: Action) -> &'static str {
-    match action {
-        Action::Renderer | Action::GpuProfile => "monitor",
-        Action::RenderScale | Action::Aspect => "image",
-        Action::WorkerLimit | Action::CacheBudget | Action::PerformanceHints => "zap",
-        Action::GameFiles | Action::WorldFiles => "folder",
-        Action::Profile => "user",
-        Action::Orientation | Action::Immersive | Action::Cutout => "monitor",
-        Action::InputHost => "gamepad",
-        Action::DisplayHz | Action::RecordPerformance => "clock",
-        Action::ExportDiagnostics => "bug",
-        Action::ExportPerformance => "terminal",
-        Action::Field(_) => "server",
-        _ => "sliders",
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum SettingsSection {
+    Renderer,
+    Game,
+    Controls,
+    Launcher,
+    About,
+}
+
+impl SettingsSection {
+    const ALL: [Self; 5] = [Self::Renderer, Self::Game, Self::Controls, Self::Launcher, Self::About];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Renderer => "Perender",
+            Self::Game => "Game",
+            Self::Controls => "Kontrol",
+            Self::Launcher => "Launcher",
+            Self::About => "Tentang",
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Renderer => "monitor",
+            Self::Game => "play",
+            Self::Controls => "gamepad",
+            Self::Launcher => "package",
+            Self::About => "info-box",
+        }
+    }
+
+    fn for_action(action: Action) -> Self {
+        match action {
+            Action::Renderer | Action::RenderScale | Action::DisplayHz | Action::GpuProfile => Self::Renderer,
+            Action::InputHost => Self::Controls,
+            Action::Orientation | Action::Immersive | Action::Cutout | Action::Aspect => Self::Launcher,
+            Action::Repository | Action::Logs | Action::ExportDiagnostics | Action::ExportPerformance => Self::About,
+            _ => Self::Game,
+        }
+    }
+}
+
+const SHELL: u32 = color::hex(0x1d2024, 255);
+const SHEET: u32 = color::hex(0x34393c, 255);
+const SELECTED: u32 = color::hex(0x364b57, 255);
+const LAUNCH_BLUE: u32 = color::hex(0x97cff0, 255);
+
+fn center_text(ui: &mut Ui, face: Face, size: f32, center: f32, y: f32, width: f32, fg: u32, text: &str) {
+    let label = ui.fit_text(face, size, text, width);
+    let x = center - ui.measure(face, size, &label) * 0.5;
+    ui.text(face, size, x, y, fg, &label);
+}
+
+fn nav_item(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    icon: &str,
+    label: Option<&str>,
+    active: bool,
+    action: Action,
+) {
+    let [x, y, w, h] = rect;
+    if active {
+        ui.rounded(x, y, w, h, h * 0.5, SELECTED);
+    }
+    let ix = if label.is_some() { x + 13.0 } else { x + (w - 23.0) * 0.5 };
+    ui.icon(icon, ix, y + (h - 23.0) * 0.5, 23.0, color::TEXT);
+    if let Some(label) = label {
+        ui.text(Face::Medium, 14.0, x + 42.0, y + (h - 20.0) * 0.5, color::TEXT, label);
+    }
+    targets.push((rect, action));
+}
+
+fn rail_item(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    y: f32,
+    icon: &str,
+    label: &str,
+    active: bool,
+    action: Action,
+) {
+    nav_item(ui, targets, [14.0, y, 64.0, 36.0], icon, None, active, action);
+    center_text(ui, Face::Regular, 11.5, 46.0, y + 38.0, 84.0, color::TEXT, label);
+    if let Some((rect, _)) = targets.last_mut() {
+        *rect = [4.0, y, 84.0, 57.0];
+    }
+}
+
+fn avatar(ui: &mut Ui, x: f32, y: f32, size: f32) {
+    // Generic pixel-art avatar used before a player skin is available here.
+    let palette = [0xa66239, 0xd98b4e, 0xefbf95, 0xffdec0, 0xfffaf0, 0x4b6553, 0xd59482];
+    let pixels = [
+        [0, 1, 1, 1, 1, 1, 1, 0],
+        [1, 1, 1, 1, 1, 2, 1, 1],
+        [1, 1, 1, 2, 3, 3, 1, 1],
+        [1, 2, 3, 3, 3, 3, 3, 1],
+        [2, 4, 5, 3, 3, 5, 4, 2],
+        [2, 3, 3, 3, 3, 3, 3, 2],
+        [2, 3, 3, 6, 6, 3, 3, 2],
+        [2, 2, 3, 3, 3, 3, 2, 2],
+    ];
+    let cell = size / 8.0;
+    for (row, pixels) in pixels.iter().enumerate() {
+        for (col, &pixel) in pixels.iter().enumerate() {
+            ui.rounded(x + col as f32 * cell, y + row as f32 * cell, cell, cell, 0.0, color::hex(palette[pixel], 255));
+        }
     }
 }
 
@@ -473,87 +555,6 @@ fn toggle(
     targets.push(([x, y, w, h], action));
 }
 
-/// The account button in the header: an avatar with the name's initial and a status dot.
-fn account_chip(
-    ui: &mut Ui,
-    targets: &mut Vec<([f32; 4], Action)>,
-    rect: [f32; 4],
-    status: &str,
-    signed_in: bool,
-) {
-    let [x, y, w, h] = rect;
-    let radius = h * 0.5;
-    ui.rounded(x, y + 3.0, w, h, radius, style::SHADOW);
-    ui.rounded(x, y, w, h, radius, style::SURFACE_HI);
-    ui.border(
-        x,
-        y,
-        w,
-        h,
-        radius,
-        if signed_in { mybezo::ACCENT } else { style::LINE },
-    );
-    let avatar = h - 8.0;
-    ui.rounded(
-        x + 4.0,
-        y + 4.0,
-        avatar,
-        avatar,
-        avatar * 0.5,
-        if signed_in { mybezo::ACCENT } else { style::LINE },
-    );
-    let name = status.rsplit(": ").next().unwrap_or(status).trim();
-    let initial: String = name
-        .chars()
-        .find(|c| c.is_alphanumeric())
-        .map_or_else(|| "?".into(), |c| c.to_uppercase().collect());
-    let size = (avatar * 0.5).max(10.0);
-    let iw = ui.measure(Face::SemiBold, size, &initial);
-    ui.text(
-        Face::SemiBold,
-        size,
-        x + 4.0 + (avatar - iw) * 0.5,
-        y + 4.0 + (avatar - (size * 1.45f32).round()) * 0.5,
-        if signed_in { mybezo::INK } else { color::TEXT },
-        &initial,
-    );
-    // Status dot on the avatar.
-    ui.rounded(
-        x + avatar - 4.0,
-        y + avatar - 4.0,
-        10.0,
-        10.0,
-        5.0,
-        style::SURFACE_HI,
-    );
-    ui.rounded(
-        x + avatar - 2.0,
-        y + avatar - 2.0,
-        6.0,
-        6.0,
-        3.0,
-        if signed_in { style::SUCCESS } else { mybezo::WARM },
-    );
-    let font: f32 = if h >= 40.0 { 14.0 } else { 13.0 };
-    let left = x + avatar + 14.0;
-    let text = ui.fit_text(Face::Medium, font, status, (x + w - 30.0 - left).max(8.0));
-    ui.text(
-        Face::Medium,
-        font,
-        left,
-        y + (h - (font * 1.45f32).round()) * 0.5,
-        color::TEXT,
-        &text,
-    );
-    ui.icon(
-        "chevron-down",
-        x + w - 26.0,
-        y + (h - 14.0) * 0.5,
-        14.0,
-        style::TEXT_SOFT,
-    );
-    targets.push((rect, Action::Account));
-}
 
 impl Launcher {
     /// The same spatial focus algorithm as the game's controller menus.
@@ -643,8 +644,14 @@ impl Launcher {
             ui.h = ui.h.min(bottom as f32 / ui.density);
         }
         let (w, h) = (ui.w, ui.h);
-        ui.rounded(0.0, 0.0, w, h, 0.0, mybezo::BACKGROUND);
-        if self.catalog.page == Page::Play {
+        let page = self.catalog.page;
+        let home = page == Page::Play;
+        let settings = page == Page::Settings;
+        let download = page == Page::Game || page == Page::Installed || page.is_catalog();
+        let left = if settings || download { 104.0 } else { 0.0 };
+        let compact = w - left < 700.0;
+        ui.rounded(0.0, 0.0, w, h, 0.0, SHELL);
+        if home {
             if self.foreground
                 && let Some(patch) = self.motion.patch(&gui.atlas, BACKGROUND_SPRITE)
             {
@@ -653,163 +660,137 @@ impl Launcher {
             draw_play_background(&mut ui, w, h);
         } else {
             self.motion.pause();
-            draw_backdrop(&mut ui, w, h);
         }
-        // Logo badge: a glowing two-tone tile with the monogram.
-        ui.rounded(16.0, 10.0, 36.0, 36.0, 12.0, style::GLOW);
-        ui.rounded(19.0, 13.0, 30.0, 30.0, 9.0, mybezo::WARM);
-        ui.rounded(19.0, 13.0, 30.0, 27.0, 9.0, mybezo::ACCENT);
-        ui.rounded(22.0, 15.0, 24.0, 10.0, 5.0, style::SHEEN_STRONG);
-        let monogram = ui.measure(Face::SemiBold, 18.0, "M");
-        ui.text(
-            Face::SemiBold,
-            18.0,
-            19.0 + (30.0 - monogram) * 0.5,
-            14.0,
-            mybezo::INK,
-            "M",
-        );
-        ui.text(Face::SemiBold, 22.0, 60.0, 7.0, color::TEXT, "Horizon");
-        chip(
-            &mut ui,
-            60.0,
-            36.0,
-            "MYBEZO EDITION",
-            mybezo::ACCENT,
-            color::hex(0xdab5ff, 34),
-        );
-        if self.catalog.page != Page::Play {
-            let account_rect = if w < 700.0 {
-                let width = (w * 0.5).min(230.0);
-                [w - width - 16.0, 12.0, width, 40.0]
+        if !home {
+            nav_item(&mut ui, &mut self.targets, [9.0, 5.0, 45.0, 40.0],
+                "arrow-left", None, false, Action::Back);
+            nav_item(&mut ui, &mut self.targets, [57.0, 5.0, 45.0, 40.0],
+                "home", None, false, Action::Page(Page::Play));
+        }
+        let title = if settings {
+            format!("Pengaturan - {}", self.settings_section.label())
+        } else if download {
+            format!("Unduh - {}", page.name())
+        } else if home {
+            "Horizon".into()
+        } else {
+            page.name().into()
+        };
+        let mut right = w - 12.0;
+        for (icon, label, selected, action) in [
+            ("sliders", "Pengaturan", settings, Action::Page(Page::Settings)),
+            ("download", "Unduh", download, Action::Page(Page::Game)),
+            ("user", "Akun", false, Action::Account),
+        ] {
+            let show_label = selected && w >= 540.0;
+            let width = if show_label { 125.0 } else { 45.0 };
+            right -= width;
+            nav_item(&mut ui, &mut self.targets, [right, 5.0, width, 39.0],
+                icon, show_label.then_some(label), selected, action);
+            right -= 5.0;
+        }
+        let title_x = if home { 17.0 } else { 112.0 };
+        let title = ui.fit_text(Face::Medium, 20.0, &title, (right - title_x - 4.0).max(0.0));
+        ui.text(Face::Medium, 20.0, title_x, 10.0, color::TEXT, &title);
+        if settings || download {
+            let spacing = ((h - 66.0) / 6.0).clamp(59.0, 76.0);
+            if settings {
+                for (i, section) in SettingsSection::ALL.into_iter().enumerate() {
+                    rail_item(&mut ui, &mut self.targets, 57.0 + i as f32 * spacing,
+                        section.icon(), section.label(), self.settings_section == section,
+                        Action::SettingsSection(section));
+                }
             } else {
-                [w - 320.0, 18.0, 288.0, 46.0]
-            };
-            account_chip(
-                &mut ui,
-                &mut self.targets,
-                account_rect,
-                &self.login.status(&self.catalog.config.name),
-                self.login.signed_in,
-            );
-            let tabs = Page::ALL.len() as f32;
-            let tab_margin = if w < 700.0 { 16.0 } else { 32.0 };
-            let tab_width = (w - 2.0 * tab_margin) / tabs;
-            // The navigation bar: a glass track holding the tabs.
-            card(
-                &mut ui,
-                tab_margin - 5.0,
-                83.0,
-                w - 2.0 * tab_margin + 6.0,
-                52.0,
-                21.0,
-            );
-            for (i, page) in Page::ALL.iter().enumerate() {
-                let x = tab_margin + i as f32 * tab_width;
-                button(
-                    &mut ui,
-                    &mut self.targets,
-                    [x, 88.0, tab_width - 4.0, 42.0],
-                    if w < 700.0 {
-                        match page {
-                            Page::Installed => "Files",
-                            Page::Settings => "Setup",
-                            _ => page.name(),
-                        }
-                    } else {
-                        page.name()
-                    },
-                    Action::Page(*page),
-                    *page == self.catalog.page,
-                );
+                for (i, item) in [Page::Game, Page::Mods, Page::Packs, Page::Shaders, Page::Installed, Page::Skins]
+                    .into_iter().enumerate()
+                {
+                    rail_item(&mut ui, &mut self.targets, 57.0 + i as f32 * spacing,
+                        page_icon(item), item.name(), page == item, Action::Page(item));
+                }
             }
         }
-        let compact = w < 700.0;
-        let page = self.catalog.page;
-        if page == Page::Play {
+
+        if home || page == Page::Game {
             use horizon_client::official_install::InstallStage;
             let installed = horizon_client::official_install::ready(&self.home);
             let progress = *self.install.lock().unwrap();
             let installing = self.worker.is_some();
-            let landscape = w >= h && w >= 360.0;
-            let margin = 16.0;
-            let gap = 10.0;
-            let top = 68.0;
-            let area_h = (h - top - 68.0).max(1.0);
-            let panel_w = if landscape { ((w - 42.0) * 0.30).max(164.0) } else { w - 32.0 };
-            let panel_h = if landscape { area_h } else { (area_h * 0.42).min(170.0) };
-            let panel_x = if landscape && !self.home_panel_left { w - margin - panel_w } else { margin };
-            let grid_x = if landscape && self.home_panel_left { margin + panel_w + gap } else { margin };
-            let grid_y = if landscape { top } else { top + panel_h + gap };
-            let grid_w = if landscape { w - 42.0 - panel_w } else { panel_w };
-            let grid_h = if landscape { area_h } else { (area_h - panel_h - gap).max(1.0) };
-
-            card(&mut ui, panel_x, top, panel_w, panel_h, 20.0);
-            let status = self.login.status(&self.catalog.config.name);
-            let account_height = if landscape { (panel_h - 94.0).max(35.0) } else { (panel_h - 76.0).max(25.0) };
-            let avatar = if account_height >= 68.0 { 44.0 } else { 0.0 };
-            let avatar_x = panel_x + (panel_w - avatar) * 0.5;
-            let avatar_y = top + (account_height - avatar - 22.0).max(0.0) * 0.5;
-            if avatar > 0.0 {
-                ui.rounded(avatar_x, avatar_y, avatar, avatar, avatar * 0.5, style::WELL);
-                ui.icon("user", avatar_x + 10.0, avatar_y + 10.0, 24.0, mybezo::ACCENT);
-            }
-            let account_text = ui.fit_text(Face::Medium, 13.0, &status, panel_w - 20.0);
-            let account_width = ui.measure(Face::Medium, 13.0, &account_text);
-            ui.text(Face::Medium, 13.0, panel_x + (panel_w - account_width) * 0.5,
-                avatar_y + avatar, color::TEXT, &account_text);
-            self.targets.push(([panel_x + 8.0, top + 4.0, panel_w - 16.0, account_height - 4.0], Action::Account));
-
-            let play_y = top + panel_h - 45.0;
+            let (x, y, width, height) = if home {
+                let width = if w >= h { (w * 0.287).max(170.0) } else { w - 28.0 };
+                let height = if w >= h { h - 69.0 } else { (h * 0.50).min(370.0) };
+                (w - width - 14.0, h - height - 14.0, width, height)
+            } else {
+                (left + 7.0, 96.0, w - left - 21.0, 78.0)
+            };
+            let center = x + width * 0.5;
+            let launch = if installed { "Luncurkan" } else if self.error.is_some() { "Coba lagi" } else { "Unduh" };
+            ui.rounded(x, y, width, height, if home { 32.0 } else { 17.0 },
+                if home { color::hex(0x34393c, 244) } else { SHEET });
             let version = format!("Minecraft {}", horizon_core::VANILLA_VERSION);
-            let version = ui.fit_text(Face::Medium, 13.0, &version, panel_w - 24.0);
-            ui.text(Face::Medium, 13.0, panel_x + 12.0, play_y - 23.0, style::TEXT_SOFT, &version);
+            if home {
+                let account_end = y + height - 106.0;
+                let account_space = (account_end - y).max(0.0);
+                let size = 65.0f32.min((account_space - 47.0).max(0.0));
+                let avatar_y = y + (account_space - size - 47.0).max(0.0) * 0.5;
+                if size >= 16.0 {
+                    avatar(&mut ui, center - size * 0.5, avatar_y, size);
+                }
+                let name = self.login.profile.as_deref().or_else(|| {
+                    let name = self.catalog.config.name.trim();
+                    (!name.is_empty()).then_some(name)
+                }).unwrap_or("Masuk ke akun");
+                let provider = if self.login.pending() { "Sedang masuk…" }
+                    else if self.login.signed_in {
+                        self.login.saved_accounts.iter().find(|a| a.name == name)
+                            .map_or("Akun tersimpan", |a| match a.provider {
+                                crate::account::Provider::Microsoft => "Microsoft",
+                                crate::account::Provider::Ely => "Ely.by",
+                            })
+                    } else if self.login.profile.is_some() { "Perlu masuk kembali" }
+                    else { "Offline" };
+                let text_y = avatar_y + size + 8.0;
+                center_text(&mut ui, Face::Medium, 17.0, center, text_y, width - 22.0, color::TEXT, name);
+                center_text(&mut ui, Face::Regular, 13.0, center, text_y + 22.0, width - 22.0, color::MUTED, provider);
+                self.targets.push(([x + 10.0, y + 4.0, width - 20.0, (account_space - 4.0).max(0.0)], Action::Account));
+
+                let vy = y + height - 106.0;
+                ui.icon("package", x + 17.0, vy + 13.0, 22.0, color::MUTED);
+                let version = ui.fit_text(Face::Medium, 15.0, &version, width - 99.0);
+                ui.text(Face::Medium, 15.0, x + 48.0, vy + 4.0, color::TEXT, &version);
+                ui.text(Face::Regular, 12.0, x + 48.0, vy + 26.0, color::MUTED, "Horizon");
+                nav_item(&mut ui, &mut self.targets, [x + width - 46.0, vy + 3.0, 38.0, 40.0],
+                    "sliders", None, false, Action::Page(Page::Settings));
+            } else {
+                let release = "Rilis";
+                ui.rounded(x, 57.0, 85.0, 30.0, 12.0, SELECTED);
+                center_text(&mut ui, Face::Medium, 13.0, x + 42.5, 63.0, 75.0, color::TEXT, release);
+                ui.icon("package", x + 15.0, y + 23.0, 27.0, color::TEXT);
+                let version = ui.fit_text(Face::Medium, 17.0, &version, width - 210.0);
+                ui.text(Face::Medium, 17.0, x + 55.0, y + 13.0, color::TEXT, &version);
+                ui.text(Face::Regular, 13.0, x + 55.0, y + 38.0, color::MUTED,
+                    if installed { "Terpasang · Horizon" } else { "Tersedia untuk Horizon" });
+            }
+
+            let [bx, by, bw, bh] = if home {
+                [x + 13.0, y + height - 58.0, width - 26.0, 44.0]
+            } else {
+                let width = (width * 0.38).min(142.0);
+                [w - width - 25.0, y + 18.0, width, 42.0]
+            };
             if installing {
                 let step = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
                 let fraction = if progress.total > 0 {
                     (progress.done as f32 / progress.total as f32).clamp(0.0, 1.0)
                 } else { 0.0 };
                 let overall = (step as f32 + fraction) / InstallStage::ALL.len() as f32;
-                let label = ui.fit_text(Face::Medium, 12.0, progress.stage.label(), panel_w - 24.0);
-                ui.text(Face::Medium, 12.0, panel_x + 12.0, play_y, color::TEXT, &label);
-                ui.rounded(panel_x + 12.0, play_y + 23.0, panel_w - 24.0, 5.0, 2.5, style::WELL);
-                ui.rounded(panel_x + 12.0, play_y + 23.0, (panel_w - 24.0) * overall, 5.0, 2.5, mybezo::ACCENT);
+                center_text(&mut ui, Face::Medium, 12.0, bx + bw * 0.5, by, bw, color::TEXT, progress.stage.label());
+                ui.rounded(bx, by + 25.0, bw, 5.0, 2.5, SELECTED);
+                ui.rounded(bx, by + 25.0, bw * overall, 5.0, 2.5, LAUNCH_BLUE);
             } else {
-                button(&mut ui, &mut self.targets, [panel_x + 8.0, play_y, panel_w - 16.0, 36.0],
-                    if installed { "Launch Game" } else if self.error.is_some() { "Retry installation" } else { "Download Minecraft" },
-                    Action::Play, true);
-            }
-            if landscape {
-                button(&mut ui, &mut self.targets, [w - 142.0, 13.0, 126.0, 36.0],
-                    if self.home_panel_left { "Panel →" } else { "← Panel" },
-                    Action::SwapHomePanel, false);
-            }
-
-            let columns = if grid_w >= 485.0 { 3 } else { 2 };
-            let rows = 6 / columns;
-            let tile_w = (grid_w - gap * (columns - 1) as f32) / columns as f32;
-            let tile_h = ((grid_h - gap * (rows - 1) as f32) / rows as f32).max(24.0);
-            let details = [
-                (Page::Installed, "Manage local content"),
-                (Page::Settings, "Graphics, device and input"),
-                (Page::Skins, "Skins and capes"),
-                (Page::Mods, "Browse Horizon mods"),
-                (Page::Packs, "Browse resource packs"),
-                (Page::Shaders, "Browse shader packs"),
-            ];
-            for (i, (target, detail)) in details.into_iter().enumerate() {
-                let x = grid_x + (i % columns) as f32 * (tile_w + gap);
-                let y = grid_y + (i / columns) as f32 * (tile_h + gap);
-                card(&mut ui, x, y, tile_w, tile_h, 14.0);
-                let icon_y = if tile_h >= 57.0 { y + 10.0 } else { y + (tile_h - 16.0) * 0.5 };
-                ui.icon(page_icon(target), x + 10.0, icon_y, 16.0, mybezo::ACCENT);
-                let title = ui.fit_text(Face::SemiBold, 13.0, target.name(), tile_w - 45.0);
-                ui.text(Face::SemiBold, 13.0, x + 34.0, icon_y - 2.0, color::TEXT, &title);
-                if tile_h >= 57.0 {
-                    let detail = ui.fit_text(Face::Regular, 11.0, detail, tile_w - 20.0);
-                    ui.text(Face::Regular, 11.0, x + 10.0, y + 33.0, style::TEXT_SOFT, &detail);
-                }
-                self.targets.push(([x, y, tile_w, tile_h], Action::Page(target)));
+                ui.rounded(bx, by, bw, bh, bh * 0.5, LAUNCH_BLUE);
+                center_text(&mut ui, Face::Medium, 16.0, bx + bw * 0.5, by + (bh - 23.0) * 0.5,
+                    bw - 14.0, color::hex(0x10242f, 255), launch);
+                self.targets.push(([bx, by, bw, bh], Action::Play));
             }
         } else if page == Page::Skins {
             self.wardrobe
@@ -817,12 +798,12 @@ impl Launcher {
             self.list_view = Some(self.wardrobe.view);
             self.catalog.scroll = self.catalog.scroll.min(self.wardrobe.view[2]);
         } else if page.is_catalog() {
-            ui.icon(page_icon(page), 32.0, 145.0, 20.0, mybezo::ACCENT);
+            ui.icon(page_icon(page), left + 32.0, 61.0, 20.0, mybezo::ACCENT);
             ui.text(
                 Face::SemiBold,
                 18.0,
-                60.0,
-                142.0,
+                left + 60.0,
+                58.0,
                 color::TEXT,
                 if page == Page::Mods {
                     "Horizon Mods"
@@ -832,10 +813,11 @@ impl Launcher {
                     "Resource Packs"
                 },
             );
+            let search_width = ((w - left - 74.0) * 0.38).clamp(52.0, 158.0);
             button(
                 &mut ui,
                 &mut self.targets,
-                [32.0, 174.0, w - 240.0, 44.0],
+                [left + 22.0, 90.0, (w - left - 62.0 - search_width).max(20.0), 44.0],
                 &format!(
                     "{}{}",
                     if page == Page::Mods {
@@ -851,7 +833,7 @@ impl Launcher {
             button(
                 &mut ui,
                 &mut self.targets,
-                [w - 190.0, 174.0, 158.0, 44.0],
+                [w - 30.0 - search_width, 90.0, search_width, 44.0],
                 if page == Page::Mods && self.catalog.query.trim().starts_with("https://") {
                     "Import .hmod"
                 } else {
@@ -864,7 +846,7 @@ impl Launcher {
                 use crate::shader_catalog::Origin;
                 let width = ((w - 185.0) / 2.0).clamp(58.0, 120.0);
                 for (i, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
-                    let rect = [w - 32.0 - (2 - i) as f32 * width, 140.0, width - 5.0, 30.0];
+                    let rect = [w - 32.0 - (2 - i) as f32 * width, 56.0, width - 5.0, 30.0];
                     let selected = (if page == Page::Mods {
                         self.catalog.config.mod_source
                     } else {
@@ -901,18 +883,18 @@ impl Launcher {
                 Page::Shaders => "Horizon native .hshader packs",
                 _ => "Verified downloads / enable in Installed",
             };
-            let hint = ui.fit_text(Face::Regular, 14.0, hint, w - 64.0);
-            ui.text(Face::Regular, 14.0, 32.0, 270.0, color::MUTED, &hint);
+            let hint = ui.fit_text(Face::Regular, 14.0, hint, w - left - 64.0);
+            ui.text(Face::Regular, 14.0, left + 32.0, 186.0, color::MUTED, &hint);
             let kind = match page {
                 Page::Mods => horizon_client::content_files::Kind::Mods,
                 Page::Shaders => horizon_client::content_files::Kind::Shaders,
                 _ => horizon_client::content_files::Kind::Packs,
             };
-            let file_button_width = ((w - 72.0) / 2.0).min(158.0);
+            let file_button_width = ((w - left - 72.0) / 2.0).min(158.0);
             button(
                 &mut ui,
                 &mut self.targets,
-                [32.0, 222.0, file_button_width, 38.0],
+                [left + 32.0, 138.0, file_button_width, 38.0],
                 "Open folder",
                 Action::OpenFolder(kind),
                 false,
@@ -920,7 +902,7 @@ impl Launcher {
             button(
                 &mut ui,
                 &mut self.targets,
-                [w - 32.0 - file_button_width, 222.0, file_button_width, 38.0],
+                [w - 32.0 - file_button_width, 138.0, file_button_width, 38.0],
                 "Import file",
                 Action::Import(kind),
                 false,
@@ -952,7 +934,7 @@ impl Launcher {
                 })
                 .collect();
             let row_count = bundled.len() + catalog_rows.len();
-            let top = 296.0;
+            let top = 212.0;
             let bottom = h - 112.0;
             self.catalog.scroll = self
                 .catalog
@@ -969,21 +951,21 @@ impl Launcher {
                     continue;
                 }
                 let on = self.catalog.bundled_enabled.contains(*id);
-                card(&mut ui, 22.0, y - 4.0, w - 44.0, 70.0, 16.0);
-                ui.rounded(32.0, y + 7.0, 44.0, 44.0, 12.0, color::hex(0xdab5ff, if on { 70 } else { 26 }));
-                ui.icon("zap", 42.0, y + 17.0, 24.0, if on { mybezo::ACCENT } else { style::TEXT_SOFT });
-                let title = ui.fit_text(Face::Medium, 18.0, title, (w - 340.0).max(60.0));
-                let summary = ui.fit_text(Face::Regular, 13.5, description, w - 262.0);
-                let title_w = ui.text(Face::Medium, 18.0, 90.0, y + 4.0, color::TEXT, &title);
+                card(&mut ui, left + 22.0, y - 4.0, w - left - 44.0, 70.0, 16.0);
+                ui.rounded(left + 32.0, y + 7.0, 44.0, 44.0, 12.0, color::hex(0xdab5ff, if on { 70 } else { 26 }));
+                ui.icon("zap", left + 42.0, y + 17.0, 24.0, if on { mybezo::ACCENT } else { style::TEXT_SOFT });
+                let title = ui.fit_text(Face::Medium, 18.0, title, (w - left - 340.0).max(60.0));
+                let summary = ui.fit_text(Face::Regular, 13.5, description, (w - left - 262.0).max(24.0));
+                let title_w = ui.text(Face::Medium, 18.0, left + 90.0, y + 4.0, color::TEXT, &title);
                 chip(
                     &mut ui,
-                    96.0 + title_w,
+                    left + 96.0 + title_w,
                     y + 6.0,
                     if on { "ON" } else { "BUILT-IN" },
                     if on { mybezo::INK } else { style::TEXT_SOFT },
                     if on { style::SUCCESS } else { style::LINE_SOFT },
                 );
-                ui.text(Face::Regular, 13.5, 90.0, y + 32.0, color::MUTED, &summary);
+                ui.text(Face::Regular, 13.5, left + 90.0, y + 32.0, color::MUTED, &summary);
                 button(
                     &mut ui,
                     &mut self.targets,
@@ -1007,9 +989,9 @@ impl Launcher {
                 if y < top || y + 70.0 > bottom {
                     continue;
                 }
-                card(&mut ui, 22.0, y - 4.0, w - 44.0, 70.0, 16.0);
-                ui.rounded(32.0, y + 7.0, 44.0, 44.0, 12.0, style::SURFACE_HI);
-                ui.border(32.0, y + 7.0, 44.0, 44.0, 12.0, style::LINE);
+                card(&mut ui, left + 22.0, y - 4.0, w - left - 44.0, 70.0, 16.0);
+                ui.rounded(left + 32.0, y + 7.0, 44.0, 44.0, 12.0, style::SURFACE_HI);
+                ui.border(left + 32.0, y + 7.0, 44.0, 44.0, 12.0, style::LINE);
                 let initial: String = p
                     .title
                     .chars()
@@ -1019,15 +1001,15 @@ impl Launcher {
                 ui.text(
                     Face::SemiBold,
                     20.0,
-                    32.0 + (44.0 - initial_w) * 0.5,
+                    left + 32.0 + (44.0 - initial_w) * 0.5,
                     y + 15.0,
                     mybezo::ACCENT,
                     &initial,
                 );
-                let title = ui.fit_text(Face::Medium, 18.0, &p.title, w - 262.0);
-                let summary = ui.fit_text(Face::Regular, 13.5, &p.summary, w - 262.0);
-                ui.text(Face::Medium, 18.0, 90.0, y + 4.0, color::TEXT, &title);
-                ui.text(Face::Regular, 13.5, 90.0, y + 32.0, color::MUTED, &summary);
+                let title = ui.fit_text(Face::Medium, 18.0, &p.title, (w - left - 262.0).max(24.0));
+                let summary = ui.fit_text(Face::Regular, 13.5, &p.summary, (w - left - 262.0).max(24.0));
+                ui.text(Face::Medium, 18.0, left + 90.0, y + 4.0, color::TEXT, &title);
+                ui.text(Face::Regular, 13.5, left + 90.0, y + 32.0, color::MUTED, &summary);
                 if let Some(state) = download {
                     ui.text(Face::Medium, 15.0, w - 154.0, y + 19.0, mybezo::ACCENT, &state);
                 } else if p.kind == crate::browser::Kind::Mod
@@ -1074,7 +1056,7 @@ impl Launcher {
             button(
                 &mut ui,
                 &mut self.targets,
-                [32.0, h - 100.0, 120.0, 40.0],
+                [left + 32.0, h - 100.0, 120.0, 40.0],
                 "Previous",
                 Action::Previous,
                 false,
@@ -1082,14 +1064,14 @@ impl Launcher {
             button(
                 &mut ui,
                 &mut self.targets,
-                [166.0, h - 100.0, 120.0, 40.0],
+                [left + 166.0, h - 100.0, 120.0, 40.0],
                 "Next",
                 Action::Next,
                 false,
             );
         } else if page == Page::Installed {
             use horizon_client::content_files::Kind;
-            let top = 156.0;
+            let top = 60.0;
             let bottom = h - 100.0;
             let row_height = if compact { 110.0 } else { 72.0 };
             let total = Kind::ALL
@@ -1121,14 +1103,14 @@ impl Launcher {
                     kind.label()
                 );
                 self.list_targets
-                    .push(([32.0, y, w - 210.0, 40.0], Action::ToggleSection(section)));
+                    .push(([left + 32.0, y, w - left - 210.0, 40.0], Action::ToggleSection(section)));
                 self.list_targets
                     .push(([w - 165.0, y, 133.0, 40.0], Action::Import(kind)));
                 if y >= top && y + 40.0 <= bottom {
                     button(
                         &mut ui,
                         &mut self.targets,
-                        [32.0, y, w - 210.0, 40.0],
+                        [left + 32.0, y, w - left - 210.0, 40.0],
                         &label,
                         Action::ToggleSection(section),
                         false,
@@ -1157,7 +1139,7 @@ impl Launcher {
                     offset += row_height;
                     self.list_targets.push((
                         [
-                            if compact { 32.0 } else { w - 300.0 },
+                            if compact { left + 32.0 } else { w - 300.0 },
                             y,
                             120.0,
                             row_height - 4.0,
@@ -1171,9 +1153,9 @@ impl Launcher {
                     if y < top || y + row_height - 4.0 > bottom {
                         continue;
                     }
-                    card(&mut ui, 22.0, y - 6.0, w - 44.0, row_height - 6.0, 14.0);
+                    card(&mut ui, left + 22.0, y - 6.0, w - left - 44.0, row_height - 6.0, 14.0);
                     ui.rounded(
-                        22.0,
+                        left + 22.0,
                         y + 6.0,
                         3.0,
                         row_height - 30.0,
@@ -1184,13 +1166,13 @@ impl Launcher {
                         Face::Medium,
                         19.0,
                         &item.title,
-                        if compact { w - 64.0 } else { w - 364.0 },
+                        if compact { w - left - 64.0 } else { w - left - 364.0 },
                     );
-                    ui.text(Face::Medium, 19.0, 32.0, y, color::TEXT, &title);
+                    ui.text(Face::Medium, 19.0, left + 32.0, y, color::TEXT, &title);
                     ui.text(
                         Face::Regular,
                         14.0,
-                        32.0,
+                        left + 32.0,
                         y + 28.0,
                         color::MUTED,
                         kind.label(),
@@ -1199,7 +1181,7 @@ impl Launcher {
                         ui.text(
                             Face::Regular,
                             14.0,
-                            if compact { 32.0 } else { w - 300.0 },
+                            if compact { left + 32.0 } else { w - 300.0 },
                             y + if compact { 62.0 } else { 12.0 },
                             color::MUTED,
                             "64-bit required",
@@ -1209,7 +1191,7 @@ impl Launcher {
                             &mut ui,
                             &mut self.targets,
                             [
-                                if compact { 32.0 } else { w - 300.0 },
+                                if compact { left + 32.0 } else { w - 300.0 },
                                 y + if compact { 55.0 } else { 0.0 },
                                 120.0,
                                 40.0,
@@ -1230,29 +1212,10 @@ impl Launcher {
             }
         } else {
             let c = &self.catalog.config;
-            ui.icon("sliders", 32.0, 151.0, 22.0, mybezo::ACCENT);
-            ui.text(
-                Face::SemiBold,
-                22.0,
-                62.0,
-                146.0,
-                color::TEXT,
-                "Launch settings",
-            );
-            let row_height = if compact { 82.0 } else { 66.0 };
-            self.catalog.scroll = self
-                .catalog
-                .scroll
-                .clamp(0.0, (18.0 * row_height - (h - 130.0 - 195.0)).max(0.0));
-            self.list_view = Some([
-                195.0,
-                h - 130.0,
-                (18.0 * row_height - (h - 130.0 - 195.0)).max(0.0),
-            ]);
-            for (i, (title, value, action)) in [
-                ("Rendering", c.renderer.label().to_owned(), Action::Renderer),
+            let rows = [
+                ("Perender Global", c.renderer.label().to_owned(), Action::Renderer),
                 (
-                    "Client resolution",
+                    "Skala Resolusi",
                     if self.catalog.editing == Some("render_scale") {
                         self.catalog.render_scale_text.clone()
                     } else {
@@ -1261,7 +1224,7 @@ impl Launcher {
                     Action::RenderScale,
                 ),
                 (
-                    "Chunk worker limit",
+                    "Batas Worker Chunk",
                     if c.worker_limit == 0 {
                         "No additional limit".into()
                     } else {
@@ -1270,7 +1233,7 @@ impl Launcher {
                     Action::WorkerLimit,
                 ),
                 (
-                    "Reusable RAM cache",
+                    "Cache RAM",
                     if c.cache_budget_mib == 0 {
                         "Engine default (80 MiB)".into()
                     } else {
@@ -1279,44 +1242,44 @@ impl Launcher {
                     Action::CacheBudget,
                 ),
                 (
-                    "Game files",
+                    "File Game",
                     "Open in system Files".into(),
                     Action::GameFiles,
                 ),
                 (
-                    "World files",
+                    "File Dunia",
                     "Import / copy / back up in Files".into(),
                     Action::WorldFiles,
                 ),
-                ("Profile", format!("Profile {}", c.profile), Action::Profile),
+                ("Profil", format!("Profile {}", c.profile), Action::Profile),
                 (
-                    "Orientation",
+                    "Orientasi",
                     c.orientation.label().to_owned(),
                     Action::Orientation,
                 ),
-                ("Input", c.input_host.label().to_owned(), Action::InputHost),
+                ("Mode Input", c.input_host.label().to_owned(), Action::InputHost),
                 (
-                    "Immersive fullscreen",
+                    "Layar Penuh",
                     if c.screen.immersive { "On" } else { "Off" }.into(),
                     Action::Immersive,
                 ),
                 (
-                    "Avoid camera cutout",
+                    "Hindari Area Kamera",
                     if c.screen.avoid_cutout { "On" } else { "Off" }.into(),
                     Action::Cutout,
                 ),
                 (
-                    "Aspect ratio",
+                    "Rasio Layar",
                     c.screen.aspect.label().into(),
                     Action::Aspect,
                 ),
                 (
-                    "Display refresh rate",
+                    "Refresh Rate",
                     c.device.display_label(),
                     Action::DisplayHz,
                 ),
                 (
-                    "Performance hints",
+                    "Optimasi Performa",
                     if c.device.performance_hints {
                         "On (ADPF)"
                     } else {
@@ -1326,7 +1289,7 @@ impl Launcher {
                     Action::PerformanceHints,
                 ),
                 (
-                    "GPU profiling",
+                    "Profil GPU",
                     if c.device.gpu_profile {
                         "On / included in report"
                     } else {
@@ -1336,7 +1299,7 @@ impl Launcher {
                     Action::GpuProfile,
                 ),
                 (
-                    "Performance recording",
+                    "Rekam Performa",
                     if c.record_performance {
                         "On / up to 30 min"
                     } else {
@@ -1346,12 +1309,12 @@ impl Launcher {
                     Action::RecordPerformance,
                 ),
                 (
-                    "Diagnostic report",
+                    "Laporan Diagnostik",
                     "Export one ZIP to share".into(),
                     Action::ExportDiagnostics,
                 ),
                 (
-                    "Raw performance data",
+                    "Data Performa Mentah",
                     "Advanced / JSONL in Reports".into(),
                     Action::ExportPerformance,
                 ),
@@ -1364,159 +1327,48 @@ impl Launcher {
                     },
                     Action::Field("server"),
                 ),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let y = 195.0 + i as f32 * row_height - self.catalog.scroll;
-                self.list_targets.push((
-                    [
-                        if compact { 32.0 } else { w * 0.36 },
-                        y,
-                        if compact { w - 64.0 } else { w * 0.64 - 32.0 },
-                        if compact { 70.0 } else { 46.0 },
-                    ],
-                    action,
-                ));
-                if y < 185.0 || y + if compact { 70.0 } else { 46.0 } > h - 130.0 {
+                ("Diagnostik", "Lihat status dan log".into(), Action::Logs),
+                ("GitHub", "Buka repositori Horizon".into(), Action::Repository),
+            ];
+            let top = 58.0;
+            let bottom = h - 59.0;
+            let row_height = 77.0;
+            let section = self.settings_section;
+            let rows = rows.into_iter().filter(|(_, _, action)| SettingsSection::for_action(*action) == section);
+            let maximum = (rows.clone().count() as f32 * row_height - (bottom - top)).max(0.0);
+            self.catalog.scroll = self.catalog.scroll.clamp(0.0, maximum);
+            self.list_view = Some([top, bottom, maximum]);
+            for (i, (title, value, action)) in rows.enumerate() {
+                let y = top + i as f32 * row_height - self.catalog.scroll;
+                let rect = [left + 7.0, y, w - left - 21.0, row_height - 3.0];
+                self.list_targets.push((rect, action));
+                if y < top || y + rect[3] > bottom {
                     continue;
                 }
-                if compact {
-                    card(&mut ui, 22.0, y - 6.0, w - 44.0, 78.0, 16.0);
-                } else {
-                    card(&mut ui, 22.0, y - 7.0, w - 44.0, 60.0, 16.0);
-                }
-                let title_y = y + if compact { 0.0 } else { 13.0 };
-                ui.icon(
-                    setting_icon(action),
-                    34.0,
-                    title_y + 2.0,
-                    18.0,
-                    mybezo::ACCENT,
-                );
-                let title_room = if compact { w - 110.0 } else { w * 0.36 - 76.0 };
-                let title = ui.fit_text(Face::Medium, 15.5, title, title_room.max(40.0));
-                ui.text(
-                    Face::Medium,
-                    15.5,
-                    60.0,
-                    title_y,
-                    style::TEXT_SOFT,
-                    &title,
-                );
-                if matches!(
-                    action,
-                    Action::PerformanceHints | Action::Immersive | Action::Cutout
-                ) {
-                    toggle(
-                        &mut ui,
-                        &mut self.targets,
-                        [
-                            if compact { 32.0 } else { w * 0.36 },
-                            y + if compact { 24.0 } else { 0.0 },
-                            if compact { w - 64.0 } else { w * 0.64 - 32.0 },
-                            46.0,
-                        ],
-                        match action {
-                            Action::PerformanceHints => c.device.performance_hints,
-                            Action::Immersive => c.screen.immersive,
-                            Action::Cutout => c.screen.avoid_cutout,
-                            _ => c.device.gpu_profile,
-                        },
-                        action,
-                    );
-                } else {
-                    button(
-                        &mut ui,
-                        &mut self.targets,
-                        [
-                            if compact { 32.0 } else { w * 0.36 },
-                            y + if compact { 24.0 } else { 0.0 },
-                            if compact { w - 64.0 } else { w * 0.64 - 32.0 },
-                            46.0,
-                        ],
-                        &format!(
-                            "{} {}",
-                            value,
-                            if matches!(
-                                action,
-                                Action::Renderer
-                                    | Action::Aspect
-                                    | Action::DisplayHz
-                                    | Action::RenderScale
-                                    | Action::Profile
-                                    | Action::Orientation
-                                    | Action::InputHost
-                            ) {
-                                "v"
-                            } else {
-                                ""
-                            }
-                        ),
-                        action,
-                        false,
-                    );
-                }
+                ui.rounded(rect[0], y, rect[2], rect[3], if i == 0 { 21.0 } else { 5.0 }, SHEET);
+                let text_x = rect[0] + 18.0;
+                let title = ui.fit_text(Face::Medium, 17.0, title, rect[2] - 62.0);
+                ui.text(Face::Medium, 17.0, text_x, y + 11.0, color::TEXT, &title);
+                let value = ui.fit_text(Face::Regular, 14.0, &value, rect[2] - 62.0);
+                ui.text(Face::Regular, 14.0, text_x, y + 39.0, color::MUTED, &value);
+                ui.icon("chevron-right", w - 47.0, y + 25.0, 22.0, color::TEXT);
+                self.targets.push((rect, action));
             }
-            button(
-                &mut ui,
-                &mut self.targets,
-                [w * 0.5 + 6.0, h - 114.0, w * 0.5 - 38.0, 42.0],
-                "Microsoft / Xbox account",
-                Action::Account,
-                true,
-            );
-            button(
-                &mut ui,
-                &mut self.targets,
-                [32.0, h - 114.0, w * 0.5 - 38.0, 42.0],
-                "Diagnostics",
-                Action::Logs,
-                false,
-            );
         }
         let status = self.error.as_deref().unwrap_or(&self.catalog.status);
-        // The footer: a glass bar with the status line and the repository link.
-        card(&mut ui, 16.0, h - 58.0, w - 32.0, 50.0, 18.0);
-        let failed = self.error.is_some();
-        if !status.trim().is_empty() {
-            ui.icon(
-                if failed { "close" } else { "info-box" },
-                30.0,
-                h - 44.0,
-                16.0,
-                if failed { style::DANGER } else { mybezo::ACCENT },
-            );
+        if !status.trim().is_empty() && (!home || self.error.is_some()) {
+            let (x, width) = if home && w >= h {
+                (14.0, (w * 0.69 - 28.0).max(90.0))
+            } else {
+                (left + 7.0, w - left - 21.0)
+            };
+            let y = h - 48.0;
+            let foreground = if self.error.is_some() { style::DANGER } else { color::TEXT };
+            ui.rounded(x, y, width, 36.0, 12.0, SHEET);
+            ui.icon("info-box", x + 10.0, y + 10.0, 16.0, foreground);
+            let label = ui.fit_text(Face::Regular, 13.0, status, width - 46.0);
+            ui.text(Face::Regular, 13.0, x + 35.0, y + 9.0, foreground, &label);
         }
-        for (i, line) in status
-            .chars()
-            .collect::<Vec<_>>()
-            .chunks(110)
-            .take(2)
-            .enumerate()
-        {
-            ui.text(
-                Face::Regular,
-                13.5,
-                54.0,
-                h - 50.0 + i as f32 * 18.0,
-                if failed { style::DANGER } else { style::TEXT_SOFT },
-                &ui.fit_text(
-                    Face::Regular,
-                    13.5,
-                    &line.iter().collect::<String>(),
-                    (w - 230.0).max(40.0),
-                ),
-            );
-        }
-        button(
-            &mut ui,
-            &mut self.targets,
-            [w - 146.0, h - 50.0, 116.0, 34.0],
-            "GitHub",
-            Action::Repository,
-            false,
-        );
         if self.login.visible {
             self.list_targets.clear();
             self.list_view = None;
@@ -1997,9 +1849,12 @@ impl Launcher {
                 self.refresh_wardrobe_account();
             }
             Some(Action::LoginLink) => self.login.open_link(),
-            Some(Action::SwapHomePanel) => {
-                self.home_panel_left = !self.home_panel_left;
-                self.focus = None;
+            Some(Action::Back) => self.request_back(),
+            Some(Action::SettingsSection(section)) => {
+                self.settings_section = section;
+                self.catalog.scroll = 0.0;
+                self.catalog.editing = None;
+                crate::platform::hide();
             }
             Some(Action::Page(page)) => {
                 if page == Page::Skins {
@@ -2238,28 +2093,8 @@ impl Launcher {
                 }
             }
             TouchPhase::Ended => {
-                if let Some(drag) = self.drag.take() {
-                    if !drag.moved {
-                        self.activate(events)?;
-                    } else if self.catalog.page == Page::Play
-                        && !self.login.visible
-                        && self.chooser.is_none()
-                        && !self.exit_confirmation
-                    {
-                        let density = f64::from(self.ui_density());
-                        let [x, y] = drag.origin();
-                        let dx = t.location.x - x;
-                        let dy = t.location.y - y;
-                        let can_swap = self.targets.iter().any(|(_, action)| *action == Action::SwapHomePanel);
-                        let from_account = self.targets.iter().any(|([left, top, w, h], action)| {
-                            let (x, y) = ((x / density) as f32, (y / density) as f32);
-                            *action == Action::Account && x >= *left && x <= *left + *w
-                                && y >= *top && y <= *top + *h
-                        });
-                        if can_swap && from_account && dx.abs() > (42.0 * density).max(dy.abs()) {
-                            self.home_panel_left = dx < 0.0;
-                        }
-                    }
+                if self.drag.take().is_some_and(|drag| !drag.moved) {
+                    self.activate(events)?;
                 }
             }
             TouchPhase::Cancelled => {

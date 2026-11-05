@@ -26,10 +26,6 @@ impl Drag {
         }
     }
 
-    pub(super) fn origin(&self) -> [f64; 2] {
-        self.origin
-    }
-
     pub(super) fn origin_y(&self) -> f64 {
         self.origin[1]
     }
