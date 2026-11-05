@@ -216,8 +216,8 @@ pub(super) fn touch(t: &Touch, size: [u32; 2], density: f32, playing: bool) -> b
                 TouchPhase::Cancelled => Outcome::None,
             };
             match outcome {
-                Outcome::Keyboard(true) => crate::platform::show(""),
-                Outcome::Keyboard(false) => crate::platform::hide(),
+                Outcome::ShowKeyboard(text) => crate::platform::show(&text),
+                Outcome::HideKeyboard => crate::platform::hide(),
                 Outcome::Save => match storage::save(&s.home, editor.layout()) {
                     Ok(()) => {
                         s.controls = s.editor.take().unwrap().into_controls();

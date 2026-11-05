@@ -103,8 +103,9 @@ enum Action {
 #[derive(Debug, PartialEq)]
 pub enum Outcome {
     None,
-    /// Show or hide the soft keyboard for typing.
-    Keyboard(bool),
+    /// Start the soft keyboard with the current field value.
+    ShowKeyboard(String),
+    HideKeyboard,
     /// Write the layout and leave.
     Save,
     /// Leave without saving.
@@ -355,7 +356,7 @@ impl Editor {
         self.hits.find(&Action::AddButton)
     }
 
-    fn typed_mut(&mut self) -> Option<&mut String> {
+    fn typed_mut(&mut self, create: bool) -> Option<&mut String> {
         match (self.typing?, self.selected) {
             (Typing::Label, Some(Selected::Button(l, i))) => Some(
                 &mut self.controls.layout.layers[l].normal_buttons[i]
@@ -369,6 +370,7 @@ impl Editor {
                 let events = &mut self.controls.layout.layers[l].normal_buttons[i].click_events;
                 let at = match events.iter().position(|e| e.kind == EventType::SendText) {
                     Some(at) => at,
+                    None if !create => return None,
                     None => {
                         events.push(ClickEvent {
                             kind: EventType::SendText,
@@ -388,14 +390,14 @@ impl Editor {
 
     /// Text typed into the field being edited.
     pub fn type_text(&mut self, text: &str) {
-        if let Some(field) = self.typed_mut() {
+        if let Some(field) = self.typed_mut(true) {
             field.push_str(text);
             self.dirty = true;
         }
     }
 
     pub fn backspace(&mut self) {
-        if let Some(field) = self.typed_mut() {
+        if let Some(field) = self.typed_mut(false) {
             field.pop();
             self.dirty = true;
         }
@@ -912,7 +914,10 @@ impl Editor {
                 self.layers_open = !self.layers_open;
                 self.picking = None;
             }
-            Action::Save => return Outcome::Save,
+            Action::Save => {
+                self.finish_typing();
+                return Outcome::Save;
+            }
             Action::Exit => return Outcome::Exit,
             Action::Close => {
                 let typing = self.finish_typing();
@@ -924,13 +929,13 @@ impl Editor {
                     self.select(None);
                 }
                 if typing {
-                    return Outcome::Keyboard(false);
+                    return Outcome::HideKeyboard;
                 }
             }
             Action::Tab(tab) => {
                 self.tab = tab;
                 if self.finish_typing() {
-                    return Outcome::Keyboard(false);
+                    return Outcome::HideKeyboard;
                 }
             }
             Action::Slide(_) => {}
@@ -1004,11 +1009,12 @@ impl Editor {
             Action::Type(target) => {
                 if self.typing == Some(target) {
                     self.finish_typing();
-                    return Outcome::Keyboard(false);
+                    return Outcome::HideKeyboard;
                 }
                 self.finish_typing();
                 self.typing = Some(target);
-                return Outcome::Keyboard(true);
+                let text = self.typed_mut(false).cloned().unwrap_or_default();
+                return Outcome::ShowKeyboard(text);
             }
             Action::Style(id) => {
                 match self.selected {
@@ -1133,7 +1139,7 @@ impl Editor {
                 }
                 self.rebuild();
                 if self.typing.take().is_some() {
-                    return Outcome::Keyboard(false);
+                    return Outcome::HideKeyboard;
                 }
             }
             Action::LayerSelect(l) => {
@@ -2199,6 +2205,51 @@ impl Editor {
                 primary,
                 a,
             ) + gap;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ime_edit::editor_changes, osk::Output};
+
+    #[test]
+    fn android_keyboard_can_replace_and_clear_the_default_button_label() {
+        let screen = Screen {
+            width: 1280.0,
+            height: 720.0,
+            density: 2.0,
+            dark: true,
+        };
+        let mut editor = Editor::new(Controls::default_layout());
+        editor.act(Action::AddButton, screen);
+        for (expected, replacement) in [("Button", "F3"), ("F3", "")] {
+            let Outcome::ShowKeyboard(initial) = editor.act(Action::Type(Typing::Label), screen)
+            else {
+                panic!("editing the label should open the keyboard");
+            };
+            assert_eq!(initial, expected);
+            for output in editor_changes(&initial, replacement, false) {
+                match output {
+                    Output::Backspace => editor.backspace(),
+                    Output::Text(text) => editor.type_text(&text),
+                    _ => panic!("changing a label should not submit it"),
+                }
+            }
+            assert_eq!(
+                editor.act(Action::Type(Typing::Label), screen),
+                Outcome::HideKeyboard
+            );
+            let Some(Selected::Button(layer, button)) = editor.selected else {
+                panic!("the new button should remain selected");
+            };
+            assert_eq!(
+                editor.layout().layers[layer].normal_buttons[button]
+                    .text
+                    .default,
+                replacement
+            );
         }
     }
 }
