@@ -968,6 +968,25 @@ const COLOR_SWATCHES: [(u32, &str); 8] = [
     (0xFFF87171, "Crimson"),
     (0xFFF4EFFA, "Snow"),
 ];
+const TRANSPARENT_BUTTON_COLOR: u32 = 0;
+
+fn cycle_button_state_fill(fill: &mut u32, stroke: &mut u32, stroke_offset: usize) {
+    let next = if *fill == TRANSPARENT_BUTTON_COLOR {
+        0
+    } else {
+        COLOR_SWATCHES
+            .iter()
+            .position(|(color, _)| *color == *fill)
+            .unwrap_or(0)
+            + 1
+    };
+    if let Some(&(color, _)) = COLOR_SWATCHES.get(next) {
+        *fill = color;
+        *stroke = COLOR_SWATCHES[(next + stroke_offset) % COLOR_SWATCHES.len()].0;
+    } else {
+        *fill = TRANSPARENT_BUTTON_COLOR;
+    }
+}
 
 const KB_ROWS: &[&[(&str, &str, f32)]] = &[
     &[
@@ -4300,6 +4319,24 @@ fn joystick_visibility_rect(x: f32, y: f32, width: f32) -> [f32; 4] {
     [x + width - 126.0, y - 4.0, 114.0, 24.0]
 }
 
+fn transparent_swatch_rect(x: f32, y: f32) -> [f32; 4] {
+    [x + 98.0, y + 3.0, 72.0, 17.0]
+}
+
+fn draw_transparent_swatch(ui: &mut crate::ui_theme::Ui, x: f32, y: f32, color: u32) {
+    use crate::ui_theme::Face;
+    let theme = crate::ui_theme::active_theme();
+    let rect = transparent_swatch_rect(x, y);
+    let [x, y, w, h] = rect;
+    let selected = color >> 24 == 0;
+    let tint = if selected { theme.accent } else { theme.text_primary };
+    if selected {
+        ui.rounded(x, y, w, h, 8.0, theme.surface_selected);
+    }
+    ui.border(x, y, w, h, 8.0, if selected { theme.accent } else { theme.border });
+    ui.centered_fit(Face::SemiBold, 8.8, rect, tint, "Transparent");
+}
+
 pub fn draw_hud_editor(
     tc: &crate::touch::TouchControls,
     b: &mut HudBatch,
@@ -5545,6 +5582,7 @@ pub fn draw_hud_editor(
                         st_muted,
                         "BUTTON COLOR",
                     );
+                    draw_transparent_swatch(&mut ui, wx, sw_y, p.button_color);
                     let sw_d = 20.0;
                     let sw_row_y = sw_y + sw_card_h - sw_d - 7.0;
                     for (i, (col, _)) in COLOR_SWATCHES.iter().enumerate() {
@@ -5583,7 +5621,17 @@ pub fn draw_hud_editor(
                         1.3,
                         p.on_click_stroke_color,
                     );
-                    ui.centered_fit(Face::SemiBold, 8.2, clk_r, st_text, "onClick Col (Cycle)");
+                    ui.centered_fit(
+                        Face::SemiBold,
+                        8.2,
+                        clk_r,
+                        st_text,
+                        if p.on_click_color >> 24 == 0 {
+                            "onClick: Transparent"
+                        } else {
+                            "onClick Col (Cycle)"
+                        },
+                    );
                     ui.rounded(
                         tog_r[0],
                         tog_r[1],
@@ -5601,7 +5649,17 @@ pub fn draw_hud_editor(
                         1.3,
                         p.on_toggle_stroke_color,
                     );
-                    ui.centered_fit(Face::SemiBold, 8.2, tog_r, st_text, "onToggle Col (Cycle)");
+                    ui.centered_fit(
+                        Face::SemiBold,
+                        8.2,
+                        tog_r,
+                        st_text,
+                        if p.on_toggle_color >> 24 == 0 {
+                            "onToggle: Transparent"
+                        } else {
+                            "onToggle Col (Cycle)"
+                        },
+                    );
                 }
                 1 => {
                     // Button Tab 1: Shape, Stroke, Roundness & Aspect Ratios + Live Preview + Stroke Color Swatches
@@ -5752,6 +5810,7 @@ pub fn draw_hud_editor(
                         st_muted,
                         "STROKE COLOR",
                     );
+                    draw_transparent_swatch(&mut ui, wx, sw_y, p.stroke_color);
                     let sw_d = 20.0;
                     let sw_row_y = sw_y + sw_card_h - sw_d - 7.0;
                     for (i, (col, _)) in COLOR_SWATCHES.iter().enumerate() {
@@ -7418,6 +7477,13 @@ pub fn touch_hud_editor(
                     }
                     let sw_y = cards_y + card_h + 8.0;
                     let sw_card_h = (box_y + box_h - sw_y - 10.0).clamp(48.0, 62.0);
+                    if inside(transparent_swatch_rect(wx, sw_y)) {
+                        push_undo_snapshot(&mut ed, &tc.settings);
+                        mutate_placement(tc, &ed, &|pl| pl.button_color = TRANSPARENT_BUTTON_COLOR);
+                        let _ = tc.settings.save();
+                        tc.clicked = true;
+                        return false;
+                    }
                     let sw_d = 20.0;
                     let sw_row_y = sw_y + sw_card_h - sw_d - 7.0;
                     for (i, (col, _)) in COLOR_SWATCHES.iter().enumerate() {
@@ -7437,13 +7503,11 @@ pub fn touch_hud_editor(
                     if inside([act_x, sw_y + 5.0, act_w, half_h]) {
                         push_undo_snapshot(&mut ed, &tc.settings);
                         mutate_placement(tc, &ed, &|pl| {
-                            let idx = COLOR_SWATCHES
-                                .iter()
-                                .position(|(c, _)| *c == pl.on_click_color)
-                                .unwrap_or(0);
-                            pl.on_click_color = COLOR_SWATCHES[(idx + 1) % COLOR_SWATCHES.len()].0;
-                            pl.on_click_stroke_color =
-                                COLOR_SWATCHES[(idx + 2) % COLOR_SWATCHES.len()].0;
+                            cycle_button_state_fill(
+                                &mut pl.on_click_color,
+                                &mut pl.on_click_stroke_color,
+                                1,
+                            );
                         });
                         let _ = tc.settings.save();
                         tc.clicked = true;
@@ -7452,13 +7516,11 @@ pub fn touch_hud_editor(
                     if inside([act_x, sw_y + 9.0 + half_h, act_w, half_h]) {
                         push_undo_snapshot(&mut ed, &tc.settings);
                         mutate_placement(tc, &ed, &|pl| {
-                            let idx = COLOR_SWATCHES
-                                .iter()
-                                .position(|(c, _)| *c == pl.on_toggle_color)
-                                .unwrap_or(0);
-                            pl.on_toggle_color = COLOR_SWATCHES[(idx + 1) % COLOR_SWATCHES.len()].0;
-                            pl.on_toggle_stroke_color =
-                                COLOR_SWATCHES[(idx + 3) % COLOR_SWATCHES.len()].0;
+                            cycle_button_state_fill(
+                                &mut pl.on_toggle_color,
+                                &mut pl.on_toggle_stroke_color,
+                                2,
+                            );
                         });
                         let _ = tc.settings.save();
                         tc.clicked = true;
@@ -7527,6 +7589,13 @@ pub fn touch_hud_editor(
                     }
                     let sw_y = cards_y + 74.0 + 8.0;
                     let sw_card_h = (box_y + box_h - sw_y - 10.0).clamp(48.0, 62.0);
+                    if inside(transparent_swatch_rect(wx, sw_y)) {
+                        push_undo_snapshot(&mut ed, &tc.settings);
+                        mutate_placement(tc, &ed, &|pl| pl.stroke_color = TRANSPARENT_BUTTON_COLOR);
+                        let _ = tc.settings.save();
+                        tc.clicked = true;
+                        return false;
+                    }
                     let sw_d = 20.0;
                     let sw_row_y = sw_y + sw_card_h - sw_d - 7.0;
                     for (i, (col, _)) in COLOR_SWATCHES.iter().enumerate() {
@@ -7985,6 +8054,18 @@ pub fn touch_hud_editor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transparent_button_state_fill_keeps_its_outline() {
+        let mut fill = 0xFFF4EFFA;
+        let mut stroke = 0xFF34D399;
+        cycle_button_state_fill(&mut fill, &mut stroke, 1);
+        assert_eq!(fill, 0);
+        assert_eq!(stroke, 0xFF34D399);
+        cycle_button_state_fill(&mut fill, &mut stroke, 1);
+        assert_eq!(fill, 0xFF1E1B2E);
+        assert_eq!(stroke, 0xFF9A7BFF);
+    }
     #[test]
     fn mcpe_extra_keys_leave_a_separate_slot_for_the_control_hub() {
         let mut ui = TouchUi::default();
