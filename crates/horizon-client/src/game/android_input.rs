@@ -283,8 +283,8 @@ impl Game<'_> {
             if let Err(error) = result {
                 log::warn!("Custom touch action: {error}");
             }
-            if down && self.screen == Screen::Chat {
-                self.android_show_keyboard();
+            if down {
+                self.android_maybe_open_chat_keyboard();
             }
             return;
         }
@@ -483,8 +483,8 @@ impl Game<'_> {
                 }
             }
         }
-        if down && matches!(key, KeyCode::KeyT | KeyCode::Slash) && self.screen == Screen::Chat {
-            self.android_show_keyboard();
+        if down && matches!(key, KeyCode::KeyT | KeyCode::Slash) {
+            self.android_maybe_open_chat_keyboard();
         }
     }
 
@@ -830,6 +830,11 @@ impl Game<'_> {
                     let _ = self.pad.touch.settings.save();
                     self.settings.touch = self.pad.touch.settings.clone();
                 }
+                InGameMenuAction::ToggleAutoOpenChatKeyboard => {
+                    self.pad.touch.settings.auto_open_chat_keyboard ^= true;
+                    let _ = self.pad.touch.settings.save();
+                    self.settings.touch = self.pad.touch.settings.clone();
+                }
                 InGameMenuAction::ToggleInvertY => {
                     let next = !self.pad.touch.settings.invert_y;
                     self.pad.touch.settings.invert_y = next;
@@ -969,9 +974,8 @@ impl Game<'_> {
                         self.key_pressed(key)?;
                     }
                     self.debug_key(key, KeyAction::Release);
-                    if matches!(key, KeyCode::KeyT | KeyCode::Slash) && self.screen == Screen::Chat
-                    {
-                        self.android_show_keyboard();
+                    if matches!(key, KeyCode::KeyT | KeyCode::Slash) {
+                        self.android_maybe_open_chat_keyboard();
                     }
                 }
                 InGameMenuAction::OpenKeyboard => {
@@ -1148,10 +1152,8 @@ impl Game<'_> {
                             if !self.debug_key(key, KeyAction::Press) {
                                 self.key_pressed(key)?;
                             }
-                            if matches!(key, KeyCode::KeyT | KeyCode::Slash)
-                                && self.screen == Screen::Chat
-                            {
-                                self.android_show_keyboard();
+                            if matches!(key, KeyCode::KeyT | KeyCode::Slash) {
+                                self.android_maybe_open_chat_keyboard();
                             }
                         }
                     }
@@ -1162,6 +1164,12 @@ impl Game<'_> {
         let _ = (events, id);
         Ok(false)
     }
+    pub(super) fn android_maybe_open_chat_keyboard(&mut self) {
+        if self.screen == Screen::Chat && self.pad.touch.settings.auto_open_chat_keyboard {
+            self.android_show_keyboard();
+        }
+    }
+
     pub(super) fn android_show_keyboard(&mut self) {
         // The in-world keyboard button needs a real editor to receive text.
         if !self.pad_in_menu() {

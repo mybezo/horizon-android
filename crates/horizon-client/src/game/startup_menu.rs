@@ -1730,6 +1730,11 @@ impl Loading {
                         let _ = self.menu.controls.settings.save();
                         self.settings.touch = self.menu.controls.settings.clone();
                     }
+                    InGameMenuAction::ToggleAutoOpenChatKeyboard => {
+                        self.menu.controls.settings.auto_open_chat_keyboard ^= true;
+                        let _ = self.menu.controls.settings.save();
+                        self.settings.touch = self.menu.controls.settings.clone();
+                    }
                     InGameMenuAction::ToggleInvertY => {
                         let next = !self.menu.controls.settings.invert_y;
                         self.menu.controls.settings.invert_y = next;

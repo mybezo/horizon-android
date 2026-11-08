@@ -141,6 +141,7 @@ pub enum InGameMenuAction {
     CycleMovementMode,
     CycleJoystickArea,
     ToggleSplitTouch,
+    ToggleAutoOpenChatKeyboard,
     ToggleInvertY,
     ToggleLeftHanded,
     ToggleGyro,
@@ -1605,6 +1606,8 @@ fn hub_metrics(w: f32, h: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32) 
     (dw, dh, dx, dy, side_w, cx, cw, body_top, body_h)
 }
 
+const CHAT_KEYBOARD_ROW_Y: f32 = 368.0;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OpacitySlider {
     Global,
@@ -2476,6 +2479,9 @@ impl TouchUi {
                 if inside([cx, spl_y, cw, 46.0]) {
                     return Some(InGameMenuAction::ToggleSplitTouch);
                 }
+                if inside([cx, body_y + CHAT_KEYBOARD_ROW_Y, cw, 46.0]) {
+                    return Some(InGameMenuAction::ToggleAutoOpenChatKeyboard);
+                }
             }
             2 => {
                 // Tab 2: Aiming, Camera & Virtual Mouse
@@ -2797,7 +2803,7 @@ impl TouchUi {
         let tab_slide = (1.0 - tab_ease) * 14.0;
         let content_height = match self.hub_tab {
             0 => 394.0,
-            1 => 368.0,
+            1 => CHAT_KEYBOARD_ROW_Y + 54.0,
             2 => 410.0,
             3 if settings.control_style == ControlStyle::GoyControl => 350.0,
             3 => 242.0,
@@ -3241,6 +3247,14 @@ impl TouchUi {
                     "Split Touch (Aim & Look)",
                     "Use center crosshair instead of tap-anywhere interaction",
                     Some(settings.crosshair()),
+                    None,
+                );
+                draw_toggle_row(
+                    &mut ui,
+                    body_y + CHAT_KEYBOARD_ROW_Y,
+                    "Auto-open Chat Keyboard",
+                    "Show the Android keyboard when opening chat",
+                    Some(settings.auto_open_chat_keyboard),
                     None,
                 );
             }

@@ -1372,6 +1372,10 @@ impl Game<'_> {
     /// Chat or a sign opened by the pad in focus mode: the keyboard opens
     /// with it (once per screen; B closes it for good).
     fn pad_auto_keyboard(&mut self) {
+        #[cfg(target_os = "android")]
+        if self.screen == Screen::Chat && !self.pad.touch.settings.auto_open_chat_keyboard {
+            return;
+        }
         let menu = &self.pad.menu;
         if menu.osk.is_none()
             && !menu.osk_dismissed

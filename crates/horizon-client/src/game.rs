@@ -16807,7 +16807,7 @@ impl Game<'_> {
                     if let Err(error) = self.key_pressed(KeyCode::KeyT) {
                         log::warn!("Touch chat: {error}");
                     }
-                    self.android_show_keyboard();
+                    self.android_maybe_open_chat_keyboard();
                 } else if self.pad.touch.settings_requested {
                     self.android_release_touch_keys(true);
                     self.audio.play_button_click();

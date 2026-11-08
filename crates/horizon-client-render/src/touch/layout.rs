@@ -466,6 +466,8 @@ pub struct Settings {
     #[serde(default)]
     pub toggle_sprint: bool,
     pub inventory_controls: bool,
+    #[serde(default = "default_true")]
+    pub auto_open_chat_keyboard: bool,
     #[serde(default)]
     pub virtual_mouse_enabled: bool,
     #[serde(default)]
@@ -632,6 +634,7 @@ impl Default for Settings {
             sprint_toggle: false,
             toggle_sprint: false,
             inventory_controls: false,
+            auto_open_chat_keyboard: true,
             virtual_mouse_enabled: false,
             disable_game_animations: false,
             resolution_scale_percent: default_res_scale(),
@@ -1305,6 +1308,7 @@ impl Settings {
         loaded.show_control_hub = prev_hub;
         loaded.control_hub_opacity = self.control_hub_opacity;
         loaded.goy_button_opacity = self.goy_button_opacity;
+        loaded.auto_open_chat_keyboard = self.auto_open_chat_keyboard;
         loaded.auto_jump = prev_auto_jump;
         *self = loaded;
         let _ = self.save_to(&game_home.join("horizon-touch.json"));
@@ -1357,6 +1361,7 @@ impl Settings {
         loaded.show_control_hub = prev_hub;
         loaded.control_hub_opacity = self.control_hub_opacity;
         loaded.goy_button_opacity = self.goy_button_opacity;
+        loaded.auto_open_chat_keyboard = self.auto_open_chat_keyboard;
         loaded.auto_jump = prev_auto_jump;
         *self = loaded;
         let _ = self.save_to(&game_home.join("horizon-touch.json"));
@@ -1826,6 +1831,7 @@ impl Settings {
             let prev_hub = self.show_control_hub;
             let prev_hub_opacity = self.control_hub_opacity;
             let prev_goy_button_opacity = self.goy_button_opacity;
+            let prev_auto_open_chat_keyboard = self.auto_open_chat_keyboard;
             let prev_auto_jump = self.auto_jump;
             *self = Self::default_for_style(style);
             self.active_mcpe_preset = prev_mcpe;
@@ -1840,6 +1846,7 @@ impl Settings {
             self.show_control_hub = prev_hub;
             self.control_hub_opacity = prev_hub_opacity;
             self.goy_button_opacity = prev_goy_button_opacity;
+            self.auto_open_chat_keyboard = prev_auto_open_chat_keyboard;
             self.auto_jump = prev_auto_jump;
             match style {
                 ControlStyle::Mcpe => self.active_mcpe_preset = "default".into(),
@@ -1879,6 +1886,7 @@ impl Settings {
         loaded.show_control_hub = active.show_control_hub;
         loaded.control_hub_opacity = active.control_hub_opacity;
         loaded.goy_button_opacity = active.goy_button_opacity;
+        loaded.auto_open_chat_keyboard = active.auto_open_chat_keyboard;
         loaded.auto_jump = active.auto_jump;
         match loaded.control_style {
             ControlStyle::Mcpe => loaded.active_mcpe_preset = loaded.preset_id.clone(),
@@ -1974,6 +1982,7 @@ mod tests {
             "classic_control_hub",
             "control_hub_opacity",
             "goy_button_opacity",
+            "auto_open_chat_keyboard",
         ] {
             fields.remove(name);
         }
@@ -1986,11 +1995,13 @@ mod tests {
         assert!(settings.show_control_hub);
         assert_eq!(settings.control_hub_opacity, 1.0);
         assert_eq!(settings.goy_button_opacity, 1.0);
+        assert!(settings.auto_open_chat_keyboard);
         assert_eq!(settings.floating_menu_pos, [0.44, 0.05]);
         settings.ui_vibrate = true;
         settings.show_control_hub = false;
         settings.control_hub_opacity = 0.45;
         settings.goy_button_opacity = 0.70;
+        settings.auto_open_chat_keyboard = false;
         let restored: Settings =
             serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
         assert!(restored.ui_vibrate);
@@ -1998,6 +2009,7 @@ mod tests {
         assert!(!restored.show_control_hub);
         assert_eq!(restored.control_hub_opacity, 0.45);
         assert_eq!(restored.goy_button_opacity, 0.70);
+        assert!(!restored.auto_open_chat_keyboard);
     }
 
     #[test]
@@ -2272,6 +2284,7 @@ mod tests {
         settings.virtual_mouse_pointer_scale = 1.6;
         settings.control_hub_opacity = 0.45;
         settings.goy_button_opacity = 0.70;
+        settings.auto_open_chat_keyboard = false;
         settings.vibrate = false;
         settings.auto_jump = true;
         settings.toggle_sprint = true;
@@ -2284,6 +2297,7 @@ mod tests {
         assert_eq!(settings.virtual_mouse_pointer_scale, 1.6);
         assert_eq!(settings.control_hub_opacity, 0.45);
         assert_eq!(settings.button_opacity_multiplier(), 0.70);
+        assert!(!settings.auto_open_chat_keyboard);
         assert!(!settings.vibrate);
         assert!(settings.auto_jump);
 
@@ -2294,6 +2308,7 @@ mod tests {
         assert_eq!(settings.control_hub_opacity, 0.45);
         assert_eq!(settings.goy_button_opacity, 0.70);
         assert_eq!(settings.button_opacity_multiplier(), 1.0);
+        assert!(!settings.auto_open_chat_keyboard);
         assert!(!settings.vibrate);
         assert!(settings.auto_jump);
 
