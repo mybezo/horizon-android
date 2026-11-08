@@ -4776,11 +4776,6 @@ impl Launcher {
                 ui.set_clip(None);
             }
             SettingsCategory::Controls => {
-                let count = 27;
-                let max_scroll = (74.0 + count as f32 * step_y - (list_bottom - list_top)).max(0.0);
-                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
-                self.list_view = Some([list_top, list_bottom, max_scroll]);
-
                 let style = touch_cfg.control_style;
                 let is_mcpe = style == horizon_client::touch::ControlStyle::Mcpe;
                 let is_goy = style == horizon_client::touch::ControlStyle::GoyControl;
@@ -4860,7 +4855,7 @@ impl Launcher {
                 let invert_y_active = opts.invert_y || touch_cfg.invert_y;
                 let sprint_latch_active = opts.toggle_sprint || touch_cfg.sprint_toggle;
 
-                let rows: [(&str, &str, SettingControl<'_>); 27] = [
+                let rows: [(&str, &str, SettingControl<'_>); _] = [
                     (
                         "LAYOUT EDITOR & PRESET PROFILES",
                         "Visual HUD canvas editor, multi-profile switcher, duplication & JSON export",
@@ -5064,6 +5059,11 @@ impl Launcher {
                         },
                     ),
                 ];
+
+                let max_scroll =
+                    (74.0 + rows.len() as f32 * step_y - (list_bottom - list_top)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+                self.list_view = Some([list_top, list_bottom, max_scroll]);
 
                 ui.set_clip(Some([
                     content_x - 2.0,
