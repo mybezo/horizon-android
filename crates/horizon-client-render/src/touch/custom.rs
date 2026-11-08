@@ -196,6 +196,12 @@ pub fn choices(raw_keys: bool) -> Vec<(String, String)> {
             .collect()
     }
 }
+/// Keep each finger's binding list independent, even when buttons share a key.
+pub(super) struct CustomPress {
+    button: Option<usize>,
+    tokens: Vec<String>,
+}
+
 impl TouchControls {
     pub(super) fn inventory_token(control: Control) -> Option<&'static str> {
         match control {
@@ -219,12 +225,16 @@ impl TouchControls {
             && self.custom_at(point).is_none()
             && let Some(token) = self.control_at(point).and_then(Self::inventory_token)
         {
-            let pressed = !self.custom_fingers.values().any(|v| v == token);
-            self.custom_fingers.insert(id, token.into());
+            let tokens = vec![token.into()];
+            self.press_custom_tokens(&tokens);
+            self.custom_fingers.insert(
+                id,
+                CustomPress {
+                    button: None,
+                    tokens,
+                },
+            );
             self.fingers.insert(id, (Role::Ignore, point));
-            if pressed {
-                self.custom_events.push((token.into(), true));
-            }
             return true;
         }
         false
@@ -291,162 +301,114 @@ impl TouchControls {
         started: bool,
         ended: bool,
     ) -> bool {
-        if let Some(key) = self.custom_fingers.get(&id).cloned() {
-            if ended {
-                self.custom_fingers.remove(&id);
-                let was_passthrough = self
-                    .fingers
-                    .remove(&id)
-                    .is_some_and(|(r, _)| matches!(r, Role::Look { .. }));
-                if !self.custom_fingers.values().any(|k| *k == key)
-                    && !self.latched_custom.contains(&key)
-                {
-                    let mut extra_tokens = Vec::new();
-                    for btn in &self.settings.custom_buttons {
-                        if btn.key == key {
-                            for extra in [&btn.second_key, &btn.third_key] {
-                                if !extra.is_empty()
-                                    && CustomButton::valid_token(extra)
-                                    && extra != "key.keyboard.unknown"
-                                    && !self.latched_custom.contains(extra)
-                                    && !extra_tokens.contains(extra)
-                                {
-                                    extra_tokens.push(extra.clone());
-                                }
-                            }
-                        }
-                    }
-                    self.custom_events.push((key, false));
-                    for extra in extra_tokens {
-                        self.custom_events.push((extra, false));
-                    }
-                }
-                let _ = was_passthrough;
-                return true;
-            }
-            // If this custom button has Pass-through enabled in gameplay, let TouchControls::update
-            // also compute camera look delta for this finger!
-            if !self.in_menu
-                && self
+        if ended && let Some(press) = self.custom_fingers.remove(&id) {
+            self.fingers.remove(&id);
+            self.release_custom_tokens(press.tokens);
+            return true;
+        }
+        if self.custom_fingers.contains_key(&id) {
+            // Pass-through fingers may turn the camera without tapping the world.
+            return self.in_menu
+                || !self
                     .fingers
                     .get(&id)
-                    .is_some_and(|(r, _)| matches!(r, Role::Look { .. }))
-            {
-                return false;
-            }
-            return true;
+                    .is_some_and(|(role, _)| matches!(role, Role::Look { .. }));
         }
-        // Swipeable custom buttons activate when a moving finger slides over them.
-        if !started && !ended {
-            if let Some(index) = self.custom_at(point) {
-                let placement = self.custom_placement(index);
-                if placement.swipeable
-                    && let Some(btn) = self.settings.custom_buttons.get(index)
-                {
-                    let key = btn.key.clone();
-                    let second_key = btn.second_key.clone();
-                    let third_key = btn.third_key.clone();
-                    if key != "key.keyboard.unknown"
-                        && !self.custom_fingers.values().any(|k| *k == key)
-                        && !self.latched_custom.contains(&key)
-                    {
-                        self.custom_fingers.insert(id, key.clone());
-                        self.custom_events.push((key, true));
-                        for extra in [second_key, third_key] {
-                            if !extra.is_empty()
-                                && CustomButton::valid_token(&extra)
-                                && extra != "key.keyboard.unknown"
-                            {
-                                self.custom_events.push((extra, true));
-                            }
-                        }
-                        self.clicked = true;
-                    }
-                }
-            }
+        if ended {
+            return false;
         }
-        if started
-            && let Some(index) = self.custom_at(point)
-            && let Some(btn) = self.settings.custom_buttons.get(index)
-        {
-            let active = btn.active_tokens();
-            let Some(key) = active.first().cloned() else {
-                return false;
-            };
-            let extras: Vec<String> = active.into_iter().skip(1).collect();
-            let placement = self.custom_placement(index);
-            self.clicked = true;
-            if placement.toggleable && key != "mouse.virtual.toggle" {
-                let now_on = !self.latched_custom.remove(&key);
-                if now_on {
-                    self.latched_custom.insert(key.clone());
-                }
-                self.custom_events.push((key, now_on));
-                for extra in extras {
-                    if now_on {
-                        self.latched_custom.insert(extra.clone());
-                    } else {
-                        self.latched_custom.remove(&extra);
-                    }
-                    self.custom_events.push((extra, now_on));
-                }
-                if !placement.passthrough || self.in_menu {
-                    self.fingers.insert(id, (Role::Ignore, point));
-                    return true;
-                }
-                return false;
-            }
-            let pressed = !self.custom_fingers.values().any(|k| *k == key)
-                && !self.latched_custom.contains(&key);
-            self.custom_fingers.insert(id, key.clone());
-            if pressed {
-                self.custom_events.push((key, true));
-                for extra in extras {
-                    self.custom_events.push((extra, true));
-                }
-            }
-            if placement.passthrough && !self.in_menu {
-                self.fingers.insert(
-                    id,
-                    (
-                        Role::Look {
-                            start: point,
-                            since: Instant::now(),
-                            dragged: true,
-                            held_use: false,
-                            committed: false,
-                        },
-                        point,
-                    ),
-                );
+        let Some(index) = self.custom_at(point) else {
+            return false;
+        };
+        let placement = self.custom_placement(index);
+        if !started && !placement.swipeable {
+            return false;
+        }
+        let mut tokens = self.settings.custom_buttons[index].active_tokens();
+        if tokens.is_empty() {
+            return false;
+        }
+        let toggleable = placement.toggleable && tokens[0] != "mouse.virtual.toggle";
+        // Apply modifiers before their companion click or key.
+        tokens.sort_by_key(|token| {
+            !matches!(
+                token.as_str(),
+                "key.keyboard.left.shift"
+                    | "key.keyboard.right.shift"
+                    | "key.keyboard.left.control"
+                    | "key.keyboard.right.control"
+                    | "key.keyboard.left.alt"
+                    | "key.keyboard.right.alt"
+                    | "key.keyboard.left.win"
+                    | "key.keyboard.right.win"
+            )
+        });
+        self.clicked = true;
+        if started && toggleable {
+            if let Some(previous) = self.latched_custom.remove(&index) {
+                self.release_custom_tokens(previous);
             } else {
-                self.fingers.insert(id, (Role::Ignore, point));
+                self.press_custom_tokens(&tokens);
+                self.latched_custom.insert(index, tokens);
             }
-            return true;
+        } else {
+            self.press_custom_tokens(&tokens);
+            self.custom_fingers.insert(
+                id,
+                CustomPress {
+                    button: Some(index),
+                    tokens,
+                },
+            );
         }
-        false
+        let role = if placement.passthrough && !self.in_menu {
+            Role::Look {
+                start: point,
+                since: Instant::now(),
+                dragged: true,
+                held_use: false,
+                committed: false,
+            }
+        } else {
+            Role::Ignore
+        };
+        self.fingers.insert(id, (role, point));
+        true
     }
+
+    fn press_custom_tokens(&mut self, tokens: &[String]) {
+        for token in tokens {
+            if !self.held_custom_tokens().any(|held| held == token.as_str()) {
+                self.custom_events.push((token.clone(), true));
+            }
+        }
+    }
+
+    fn release_custom_tokens(&mut self, tokens: Vec<String>) {
+        for token in tokens.into_iter().rev() {
+            if !self.held_custom_tokens().any(|held| held == token.as_str()) {
+                self.custom_events.push((token, false));
+            }
+        }
+    }
+
     pub fn held_custom_tokens(&self) -> impl Iterator<Item = &str> {
-        let extra_tokens = self
-            .settings
-            .custom_buttons
-            .iter()
-            .filter(|btn| {
-                !btn.key.is_empty()
-                    && btn.key != "key.keyboard.unknown"
-                    && (self.custom_fingers.values().any(|k| *k == btn.key)
-                        || self.latched_custom.contains(&btn.key))
-            })
-            .flat_map(|btn| [btn.second_key.as_str(), btn.third_key.as_str()])
-            .filter(|t| {
-                !t.is_empty() && *t != "key.keyboard.unknown" && CustomButton::valid_token(t)
-            });
         self.custom_fingers
             .values()
-            .chain(self.latched_custom.iter())
+            .flat_map(|press| &press.tokens)
+            .chain(self.latched_custom.values().flatten())
             .map(String::as_str)
-            .chain(extra_tokens)
     }
+
+    pub fn custom_button_state(&self, index: usize) -> (bool, bool) {
+        (
+            self.custom_fingers
+                .values()
+                .any(|press| press.button == Some(index)),
+            self.latched_custom.contains_key(&index),
+        )
+    }
+
     pub fn has_pending_key_events(&self) -> bool {
         !self.custom_events.is_empty()
     }
@@ -454,28 +416,12 @@ impl TouchControls {
         std::mem::take(&mut self.custom_events)
     }
     pub(super) fn clear_custom(&mut self) {
-        let mut keys: std::collections::BTreeSet<_> = std::mem::take(&mut self.custom_fingers)
-            .into_values()
-            .collect();
-        keys.extend(std::mem::take(&mut self.latched_custom));
-        let mut all_tokens = keys.clone();
-        for btn in &self.settings.custom_buttons {
-            if keys.contains(&btn.key)
-                || (!btn.second_key.is_empty() && keys.contains(&btn.second_key))
-                || (!btn.third_key.is_empty() && keys.contains(&btn.third_key))
-            {
-                for extra in [&btn.key, &btn.second_key, &btn.third_key] {
-                    if !extra.is_empty()
-                        && CustomButton::valid_token(extra)
-                        && extra != "key.keyboard.unknown"
-                    {
-                        all_tokens.insert(extra.clone());
-                    }
-                }
-            }
-        }
+        let tokens: std::collections::BTreeSet<_> =
+            self.held_custom_tokens().map(str::to_owned).collect();
+        self.custom_fingers.clear();
+        self.latched_custom.clear();
         self.custom_events
-            .extend(all_tokens.into_iter().map(|k| (k, false)));
+            .extend(tokens.into_iter().map(|token| (token, false)));
     }
     pub(super) fn draw_custom(&self, b: &mut HudBatch, a: &HudAtlas) {
         let hud_scale = if self.editor.is_some() {
@@ -498,8 +444,7 @@ impl TouchControls {
             }
             let [nx, ny, nw, nh] = p.rect(self.aspect());
             let rect = [nx * b.width, ny * b.height, nw * b.width, nh * b.height];
-            let held = self.custom_fingers.values().any(|key| *key == button.key);
-            let toggled = self.latched_custom.contains(&button.key);
+            let (held, toggled) = self.custom_button_state(i);
             let pressed = held || toggled;
             let base_opacity = if self.editor.is_some() {
                 p.opacity.max(0.25)
@@ -622,5 +567,36 @@ mod tests {
         assert!(up.contains(&("key.keyboard.x".into(), false)));
         assert!(up.contains(&("key.mouse.left".into(), false)));
         assert_eq!(t.settings.custom_buttons[0].layouts[0].size, stored);
+    }
+
+    #[test]
+    fn left_and_shift_left_keep_separate_button_ownership() {
+        const LEFT: &str = "key.mouse.left";
+        const SHIFT: &str = "key.keyboard.left.shift";
+        let mut touch = TouchControls::default();
+        touch.viewport(1920, 1080);
+        let left = CustomButton::new(LEFT.into(), 0);
+        let mut shift_left = CustomButton::new(LEFT.into(), 2);
+        shift_left.second_key = SHIFT.into();
+        touch.settings.custom_buttons = vec![left, shift_left];
+        let plain = touch.custom_placement(0).center;
+        let combo = touch.custom_placement(1).center;
+
+        touch.update(1, plain, true, false);
+        assert_eq!(touch.key_events(), [(LEFT.into(), true)]);
+        assert!(!touch.held_custom_tokens().any(|key| key == SHIFT));
+        assert_eq!(touch.custom_button_state(0), (true, false));
+        assert_eq!(touch.custom_button_state(1), (false, false));
+        touch.update(2, combo, true, false);
+        assert_eq!(touch.key_events(), [(SHIFT.into(), true)]);
+        touch.update(1, plain, false, true);
+        assert!(touch.key_events().is_empty());
+        touch.update(2, combo, false, true);
+        assert_eq!(touch.key_events(), [(LEFT.into(), false), (SHIFT.into(), false)]);
+
+        touch.update(3, combo, true, false);
+        assert_eq!(touch.key_events(), [(SHIFT.into(), true), (LEFT.into(), true)]);
+        assert_eq!(touch.custom_button_state(0), (false, false));
+        assert_eq!(touch.custom_button_state(1), (true, false));
     }
 }

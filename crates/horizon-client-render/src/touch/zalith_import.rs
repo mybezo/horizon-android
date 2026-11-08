@@ -386,6 +386,7 @@ pub fn convert(bytes: &[u8], screen: Screen) -> Result<Import, String> {
     if buttons == 0 && !joystick {
         return Err("This layout has no controls supported by the native editor".into());
     }
+    preset.button_visibility[Control::Move as usize] = if joystick { 1 } else { 2 };
     preset.sanitize();
     Ok(Import {
         preset,
@@ -440,6 +441,7 @@ mod tests {
         assert_eq!(imported.buttons, 1);
         assert_eq!(imported.skipped, 1);
         assert!(imported.joystick);
+        assert!(imported.preset.visible(Control::Move));
         let button = &imported.preset.custom_buttons[0];
         assert_eq!(button.active_tokens(), ["key.mouse.right", "key.keyboard.left.shift"]);
         let p = button.layouts[0];
@@ -462,5 +464,22 @@ mod tests {
         ] {
             assert!(convert(bytes, SCREEN).is_err());
         }
+    }
+
+    #[test]
+    fn layout_without_a_joystick_does_not_add_the_native_analog() {
+        let bytes = br#"{
+            "editorVersion":12,
+            "info":{"name":{"default":"D-pad"}},
+            "layers":[{"normalButtons":[{
+                "position":{"x":1500,"y":7000},
+                "buttonSize":{"type":"dp","widthDp":60,"heightDp":60},
+                "clickEvents":[{"type":"key","key":"GLFW_KEY_W"}]
+            }]}]
+        }"#;
+        let imported = convert(bytes, SCREEN).unwrap();
+        assert!(!imported.joystick);
+        assert!(!imported.preset.visible(Control::Move));
+        assert_eq!(imported.preset.custom_buttons[0].key, "key.keyboard.w");
     }
 }

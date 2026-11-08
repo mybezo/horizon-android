@@ -1474,14 +1474,8 @@ pub fn draw_goy_hud(
         }
         let label = custom.label();
 
-        let is_active_token = tc.held_custom_tokens().any(|tok| {
-            tok == custom.key
-                || (!custom.second_key.is_empty() && tok == custom.second_key)
-                || (!custom.third_key.is_empty() && tok == custom.third_key)
-        });
-        let is_vmouse_on = custom.key == "mouse.virtual.toggle" && virtual_mouse;
-        let held = is_active_token && !p.toggleable;
-        let toggled = (is_active_token && p.toggleable) || is_vmouse_on;
+        let (held, toggled) = tc.custom_button_state(i);
+        let toggled = toggled || (custom.key == "mouse.virtual.toggle" && virtual_mouse);
 
         let raw_fill = if held {
             p.on_click_color
