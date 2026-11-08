@@ -15149,7 +15149,7 @@ impl Game<'_> {
                     &mut hud,
                     &self.gui.atlas,
                     hud_in_menu,
-                    self.pad.touch_ui.virtual_mouse,
+                    &self.pad.touch_ui,
                 );
             }
         }

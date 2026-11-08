@@ -507,7 +507,9 @@ impl TouchControls {
         if self.editor.is_some() {
             p.opacity.max(0.25)
         } else {
-            (p.opacity * self.hud_opacity_scale.clamp(0.0, 1.0)).clamp(0.0, 1.0)
+            (p.opacity * self.hud_opacity_scale.clamp(0.0, 1.0)
+                * self.settings.button_opacity_multiplier())
+            .clamp(0.0, 1.0)
         }
     }
     pub fn placement(&self, c: Control) -> layout::Placement {
@@ -617,8 +619,10 @@ impl TouchControls {
                 };
                 let (x, y) = (center[0] * w - size / 2.0, center[1] * h - size / 2.0);
                 let mut js = self.settings.joystick_style;
-                js.base_opacity *= self.hud_opacity_scale.clamp(0.0, 1.0);
-                js.stick_opacity *= self.hud_opacity_scale.clamp(0.0, 1.0);
+                let opacity_scale = self.hud_opacity_scale.clamp(0.0, 1.0)
+                    * self.settings.button_opacity_multiplier();
+                js.base_opacity *= opacity_scale;
+                js.stick_opacity *= opacity_scale;
                 draw_goy_joystick(b, a, [x, y, size, size], &js, state.left);
                 continue;
             }

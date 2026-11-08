@@ -1858,6 +1858,11 @@ impl Loading {
                         let _ = self.menu.controls.settings.save();
                         self.settings.touch = self.menu.controls.settings.clone();
                     }
+                    InGameMenuAction::SetGlobalButtonOpacity(opacity) => {
+                        self.menu.controls.settings.goy_button_opacity = opacity;
+                        let _ = self.menu.controls.settings.save();
+                        self.settings.touch = self.menu.controls.settings.clone();
+                    }
                     InGameMenuAction::TriggerKey(KeyCode::Escape) => {
                         if self.menu.options_open {
                             if let Some(gui) = self.gui.as_ref() {
@@ -2527,7 +2532,7 @@ impl Loading {
                 batch,
                 &gui.atlas,
                 hud_in_menu,
-                self.menu.touch.virtual_mouse,
+                &self.menu.touch,
             );
             self.menu.touch.draw(batch, &gui.atlas, true);
             self.menu

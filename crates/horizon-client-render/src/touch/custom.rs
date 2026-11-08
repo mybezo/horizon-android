@@ -442,7 +442,7 @@ impl TouchControls {
         let hud_scale = if self.editor.is_some() {
             1.0
         } else {
-            self.hud_opacity_scale.clamp(0.0, 1.0)
+            self.hud_opacity_scale.clamp(0.0, 1.0) * self.settings.button_opacity_multiplier()
         };
         if hud_scale <= 0.001 && self.editor.is_none() {
             return;

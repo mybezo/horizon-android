@@ -27,7 +27,7 @@ pub struct TouchUi {
     pub hub_scroll: f32,
     pub hub_max_scroll: Cell<f32>,
     pub hub_scroll_drag: Option<(u64, f32, f32, bool)>,
-    hub_opacity_drag: Option<(u64, f32)>,
+    hub_opacity_drag: Option<(u64, OpacitySlider, f32)>,
     pub presets_modal_open: bool,
     pub preset_dialog: Option<PresetDialogState>,
     pub cached_presets: Vec<crate::touch::PresetMeta>,
@@ -159,6 +159,7 @@ pub enum InGameMenuAction {
     StepGyroSensitivity(i32),
     SetButtonScale(f32),
     StepButtonScale(i32),
+    SetGlobalButtonOpacity(f32),
     SetControlHubOpacity(f32),
     TriggerKey(KeyCode),
     OpenKeyboard,
@@ -1400,7 +1401,7 @@ pub fn draw_goy_hud(
     b: &mut HudBatch,
     a: &HudAtlas,
     in_menu: bool,
-    virtual_mouse: bool,
+    touch_ui: &TouchUi,
 ) {
     use crate::touch::{Control, ControlStyle};
     use crate::ui_theme::{Ui, color};
@@ -1422,6 +1423,11 @@ pub fn draw_goy_hud(
         return;
     }
     let hud_scale = tc.hud_opacity_scale.clamp(0.0, 1.0);
+    let button_opacity = if is_goy_system {
+        touch_ui.opacity_preview(OpacitySlider::Global, &tc.settings)
+    } else {
+        1.0
+    };
     let mut ui = Ui::mobile(a, b, (0.0, 0.0));
     let (w, h) = (ui.w, ui.h);
     let text_c = color::hex(0xF4EFFA, 255);
@@ -1438,7 +1444,7 @@ pub fn draw_goy_hud(
         }
         let [nx, ny, nw, nh] = p_draw.rect(tc.aspect());
         let [rx, ry, rw, rh] = [nx * w, ny * h, nw * w, nh * h];
-        let alpha = (p.opacity.clamp(0.15, 1.0) * hud_scale).clamp(0.0, 1.0);
+        let alpha = p.opacity.clamp(0.15, 1.0) * hud_scale * button_opacity;
         let js = &tc.settings.joystick_style;
         let side = rw.min(rh);
         let jx = rx + (rw - side) * 0.5;
@@ -1480,7 +1486,7 @@ pub fn draw_goy_hud(
         let label = custom.label();
 
         let (held, toggled) = tc.custom_button_state(i);
-        let toggled = toggled || (custom.key == "mouse.virtual.toggle" && virtual_mouse);
+        let toggled = toggled || (custom.key == "mouse.virtual.toggle" && touch_ui.virtual_mouse);
 
         let raw_fill = if held {
             p.on_click_color
@@ -1496,9 +1502,9 @@ pub fn draw_goy_hud(
         } else {
             p.stroke_color
         };
-        let fill_c = color::with_alpha(raw_fill, alpha);
-        let stroke_c = color::with_alpha(raw_stroke, alpha);
-        let shadow_c = color::with_alpha(p.shadow_color, alpha);
+        let fill_c = color::with_alpha(raw_fill, alpha * button_opacity);
+        let stroke_c = color::with_alpha(raw_stroke, alpha * button_opacity);
+        let shadow_c = color::with_alpha(p.shadow_color, alpha * button_opacity);
         ui.goy_box(
             rx,
             ry,
@@ -1514,7 +1520,7 @@ pub fn draw_goy_hud(
             0.0,
             shadow_c,
         );
-        let fg_col = color::with_alpha(text_c, (alpha.max(0.75) * hud_scale).clamp(0.0, 1.0));
+        let fg_col = color::with_alpha(text_c, alpha.max(0.75) * hud_scale * button_opacity);
         draw_button_icon_and_label(&mut ui, [rx, ry, rw, rh], p.icon_id, &label, fg_col);
     }
 
@@ -1580,11 +1586,40 @@ fn hub_metrics(w: f32, h: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32) 
     (dw, dh, dx, dy, side_w, cx, cw, body_top, body_h)
 }
 
-fn hub_opacity_rect(x: f32, body_y: f32, width: f32) -> [f32; 4] {
-    [x, body_y + 234.0, width, 48.0]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpacitySlider {
+    Global,
+    Gear,
+}
+
+impl OpacitySlider {
+    const ROWS: [(Self, &str); 2] = [
+        (Self::Global, "Global Button Opacity"),
+        (Self::Gear, "Gear Opacity"),
+    ];
+
+    fn rect(self, x: f32, body_y: f32, width: f32) -> [f32; 4] {
+        let offset = match self {
+            Self::Global => 234.0,
+            Self::Gear => 290.0,
+        };
+        [x, body_y + offset, width, 48.0]
+    }
 }
 
 impl TouchUi {
+    fn opacity_preview(&self, slider: OpacitySlider, settings: &crate::touch::Settings) -> f32 {
+        if let Some((_, active, value)) = self.hub_opacity_drag
+            && active == slider
+        {
+            return value;
+        }
+        match slider {
+            OpacitySlider::Global => settings.goy_button_opacity,
+            OpacitySlider::Gear => settings.control_hub_opacity,
+        }
+    }
+
     fn step_animations(&self) -> (f32, f32) {
         let open_target = if self.floating_menu { 1.0 } else { 0.0 };
         if crate::ui_theme::motion::game_animations_disabled()
@@ -1734,16 +1769,24 @@ impl TouchUi {
         let content_pane = [cx - 4.0, body_top, cw + 8.0, body_h];
         let opacity_at = |x: f32| {
             let t = ((x - cx - 10.0) / (cw - 20.0).max(16.0)).clamp(0.0, 1.0);
-            let min = Settings::MIN_CONTROL_HUB_OPACITY;
+            let min = Settings::MIN_BUTTON_OPACITY;
             ((min + t * (1.0 - min)) * 100.0).round() / 100.0
         };
-        if let Some((owner, _)) = self.hub_opacity_drag {
+        if let Some((owner, slider, _)) = self.hub_opacity_drag {
             if owner == id {
                 match phase {
-                    TouchPhase::Moved => self.hub_opacity_drag = Some((id, opacity_at(p[0]))),
+                    TouchPhase::Moved => {
+                        self.hub_opacity_drag = Some((id, slider, opacity_at(p[0])));
+                    }
                     TouchPhase::Ended => {
                         self.hub_opacity_drag = None;
-                        return Some(InGameMenuAction::SetControlHubOpacity(opacity_at(p[0])));
+                        let opacity = opacity_at(p[0]);
+                        return Some(match slider {
+                            OpacitySlider::Global => {
+                                InGameMenuAction::SetGlobalButtonOpacity(opacity)
+                            }
+                            OpacitySlider::Gear => InGameMenuAction::SetControlHubOpacity(opacity),
+                        });
                     }
                     TouchPhase::Cancelled => self.hub_opacity_drag = None,
                     TouchPhase::Started => {}
@@ -2272,8 +2315,13 @@ impl TouchUi {
             if self.hub_tab == 3 && inside(content_pane) {
                 let body_y = body_top - self.hub_scroll;
                 let tab_slide = (1.0 - self.tab_anim.get()).powi(3) * 14.0;
-                if self.goy_mode && inside(hub_opacity_rect(cx, body_y + tab_slide, cw)) {
-                    self.hub_opacity_drag = Some((id, opacity_at(p[0])));
+                if self.goy_mode
+                    && let Some((slider, _)) = OpacitySlider::ROWS.into_iter().find(|(slider, _)| {
+                        let [x, y, width, height] = slider.rect(cx, body_y + tab_slide, cw);
+                        inside([x, y + height * 0.5, width, height * 0.5])
+                    })
+                {
+                    self.hub_opacity_drag = Some((id, slider, opacity_at(p[0])));
                     return Some(InGameMenuAction::Close);
                 }
                 let scale_card_y = body_y + 18.0;
@@ -2568,9 +2616,8 @@ impl TouchUi {
         let text_c = theme.text_primary;
         let muted_c = theme.text_muted;
         let danger_c = theme.danger;
-        let gear_opacity = self
-            .hub_opacity_drag
-            .map_or(settings.control_hub_opacity, |(_, opacity)| opacity);
+        let gear_opacity = self.opacity_preview(OpacitySlider::Gear, settings)
+            * self.opacity_preview(OpacitySlider::Global, settings);
 
         let bubble_alpha = if self.floating_menu {
             1.0
@@ -2733,7 +2780,7 @@ impl TouchUi {
             0 => 394.0,
             1 => 368.0,
             2 => 410.0,
-            3 if settings.control_style == ControlStyle::GoyControl => 294.0,
+            3 if settings.control_style == ControlStyle::GoyControl => 350.0,
             3 => 242.0,
             _ => 340.0,
         };
@@ -3514,18 +3561,21 @@ impl TouchUi {
                     None,
                 );
                 if settings.control_style == ControlStyle::GoyControl {
-                    let min = Settings::MIN_CONTROL_HUB_OPACITY;
-                    draw_m3_stepper_cell(
-                        &mut ui,
-                        hub_opacity_rect(cx, body_y, cw),
-                        &format!("Gear Opacity|{:.0}%", gear_opacity * 100.0),
-                        (gear_opacity - min) / (1.0 - min),
-                        accent,
-                        card_sel,
-                        card_bg,
-                        border_c,
-                        text_c,
-                    );
+                    let min = Settings::MIN_BUTTON_OPACITY;
+                    for (slider, label) in OpacitySlider::ROWS {
+                        let opacity = self.opacity_preview(slider, settings);
+                        draw_m3_stepper_cell(
+                            &mut ui,
+                            slider.rect(cx, body_y, cw),
+                            &format!("{label}|{:.0}%", opacity * 100.0),
+                            (opacity - min) / (1.0 - min),
+                            accent,
+                            card_sel,
+                            card_bg,
+                            border_c,
+                            text_c,
+                        );
+                    }
                 }
             }
             _ => {

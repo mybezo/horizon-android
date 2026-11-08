@@ -953,6 +953,11 @@ impl Game<'_> {
                     let _ = self.pad.touch.settings.save();
                     self.settings.touch = self.pad.touch.settings.clone();
                 }
+                InGameMenuAction::SetGlobalButtonOpacity(opacity) => {
+                    self.pad.touch.settings.goy_button_opacity = opacity;
+                    let _ = self.pad.touch.settings.save();
+                    self.settings.touch = self.pad.touch.settings.clone();
+                }
                 InGameMenuAction::StepButtonScale(dir) => {
                     self.pad.touch.settings.button_scale =
                         (self.pad.touch.settings.button_scale + dir as f32 * 0.10).clamp(0.5, 2.0);
