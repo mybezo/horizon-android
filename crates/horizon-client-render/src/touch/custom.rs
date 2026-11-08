@@ -127,6 +127,14 @@ impl CustomButton {
     }
 }
 
+pub fn scroll_wheel_delta(token: &str) -> Option<f64> {
+    match token {
+        "mouse.scroll.up" => Some(1.0),
+        "mouse.scroll.down" => Some(-1.0),
+        _ => None,
+    }
+}
+
 pub fn friendly_token_name(token: &str) -> String {
     match token {
         "" | "key.keyboard.unknown" => "Unassigned".into(),

@@ -294,9 +294,8 @@ impl Game<'_> {
             }
             return;
         }
-        if name == "mouse.scroll.up" || name == "mouse.scroll.down" {
+        if let Some(delta) = horizon_client::touch::custom::scroll_wheel_delta(name) {
             if down {
-                let delta = if name == "mouse.scroll.up" { 8.0 } else { 1.0 };
                 let next = horizon_client::mouse::ScrollWheelHandler::next_selection(
                     delta,
                     self.selected as i32,

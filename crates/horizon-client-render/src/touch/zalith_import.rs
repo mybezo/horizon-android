@@ -443,6 +443,30 @@ mod tests {
     };
 
     #[test]
+    fn zalith_scroll_buttons_move_the_hotbar_in_opposite_directions() {
+        use crate::{mouse::ScrollWheelHandler, touch::custom::scroll_wheel_delta};
+
+        for (key, expected, wrapped) in [
+            ("launcher.event.scroll_up", 3, (0, 8)),
+            ("launcher.event.scroll_up.single", 3, (0, 8)),
+            ("launcher.event.scroll_down", 5, (8, 0)),
+            ("launcher.event.scroll_down.single", 5, (8, 0)),
+        ] {
+            let token = binding(&Event {
+                kind: "launcher_event".into(),
+                key: key.into(),
+            })
+            .unwrap();
+            let delta = scroll_wheel_delta(&token).unwrap();
+            assert_eq!(ScrollWheelHandler::next_selection(delta, 4, 9), expected);
+            assert_eq!(
+                ScrollWheelHandler::next_selection(delta, wrapped.0, 9),
+                wrapped.1
+            );
+        }
+    }
+
+    #[test]
     fn imports_bindings_and_geometry_as_native_controls() {
         let bytes = br#"{
             "editorVersion":12,
