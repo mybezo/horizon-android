@@ -3,6 +3,7 @@ use horizon_client::{
     Result,
     content_files::{self, Kind},
     hud::{HudAtlas, HudBatch, rgba},
+    touch::{Settings as TouchSettings, layout::ControlStyle, zalith_import},
     ui_theme::{Face, Ui, color},
 };
 use jni::{
@@ -22,6 +23,7 @@ struct Request {
     kind: Kind,
     appearance: Option<crate::skins::library::Kind>,
     target_dir: Option<PathBuf>,
+    zalith_screen: Option<zalith_import::Screen>,
     home: PathBuf,
     cache: PathBuf,
 }
@@ -108,6 +110,18 @@ pub fn poll() -> Option<Notice> {
         .take()
 }
 pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
+    begin_import(kind, home, None)
+}
+
+pub fn begin_zalith(home: PathBuf, screen: zalith_import::Screen) -> std::result::Result<(), String> {
+    begin_import(Kind::Packs, home, Some(screen))
+}
+
+fn begin_import(
+    kind: Kind,
+    home: PathBuf,
+    zalith_screen: Option<zalith_import::Screen>,
+) -> std::result::Result<(), String> {
     if busy() {
         return Err("Finish or cancel the current import first".into());
     }
@@ -120,6 +134,7 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
         kind,
         appearance: None,
         target_dir: None,
+        zalith_screen,
         home,
         cache,
     });
@@ -127,7 +142,11 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
     }
-    notice(format!("Choose a {} file", kind.label()), false);
+    if zalith_screen.is_some() {
+        notice("Choose a ZalithLauncher2 controller JSON", false);
+    } else {
+        notice(format!("Choose a {} file", kind.label()), false);
+    }
     Ok(())
 }
 pub fn picker_failed(error: &str) {
@@ -150,6 +169,7 @@ pub fn begin_appearance(
         kind: Kind::Packs,
         appearance: Some(kind),
         target_dir: None,
+        zalith_screen: None,
         home,
         cache,
     });
@@ -175,6 +195,7 @@ pub fn begin_into_dir(target_dir: PathBuf) -> std::result::Result<(), String> {
         kind: Kind::Packs,
         appearance: None,
         target_dir: Some(target_dir),
+        zalith_screen: None,
         home: PathBuf::new(),
         cache,
     });
@@ -281,7 +302,9 @@ pub extern "system" fn document_result(
         .spawn(move || {
             let result = (|| -> Result<()> {
                 let mut env = vm.attach_current_thread()?;
-                let fallback = if pending.kind == Kind::Mods {
+                let fallback = if pending.zalith_screen.is_some() {
+                    "controller.json"
+                } else if pending.kind == Kind::Mods {
                     "import.hmod"
                 } else {
                     "import.zip"
@@ -304,7 +327,58 @@ pub extern "system" fn document_result(
         notice(format!("Import failed: {error}"), false);
     }
 }
+fn stage_zalith(
+    home: &std::path::Path,
+    screen: zalith_import::Screen,
+    input: std::fs::File,
+) -> Result<()> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    input
+        .take(zalith_import::MAX_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    let zalith_import::Import {
+        mut preset,
+        buttons,
+        joystick,
+        skipped,
+    } = zalith_import::convert(&bytes, screen)?;
+    if CANCEL.load(Ordering::Relaxed) {
+        return Err("Import cancelled".into());
+    }
+    let style = ControlStyle::GoyControl;
+    let folder = TouchSettings::system_dir(home, style);
+    for dir in [home.join("controls"), folder.clone()] {
+        if std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err("Refusing a redirected control preset folder".into());
+        }
+    }
+    // Leave room for the numeric suffix within the native preset ID limit.
+    let stem: String = preset.preset_name.chars().take(32).collect();
+    let id = TouchSettings::allocate_unique_preset_id(home, style, &stem);
+    let target = folder.join(format!("{id}.json"));
+    if std::fs::symlink_metadata(&target).is_ok() {
+        return Err("No free filename for the imported control preset".into());
+    }
+    preset.preset_id = id.clone();
+    preset.active_profile = id.clone();
+    preset.active_goy_preset = id;
+    preset.save_to(&target)?;
+    let joystick = if joystick { " + joystick" } else { "" };
+    notice(
+        format!(
+            "Imported '{}' ({buttons} buttons{joystick}, {skipped} skipped). Select it under GoyControl presets.",
+            preset.preset_name,
+        ),
+        false,
+    );
+    Ok(())
+}
+
 fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()> {
+    if let Some(screen) = request.zalith_screen {
+        return stage_zalith(&request.home, screen, input);
+    }
     if let Some(target_dir) = request.target_dir {
         crate::document_store::validate_entry_name(&name)?;
         std::fs::create_dir_all(&target_dir)?;

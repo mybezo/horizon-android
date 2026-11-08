@@ -348,6 +348,7 @@ pub(super) enum Action {
     SaveControlProfileAsNew,
     ExportControlProfile,
     ImportControlProfile,
+    ImportZalithProfile,
     MouseSensDelta(f32),
     TouchSensDelta(f32),
     VirtualMouseSpeedDelta(f32),
@@ -4775,7 +4776,7 @@ impl Launcher {
                 ui.set_clip(None);
             }
             SettingsCategory::Controls => {
-                let count = 26;
+                let count = 27;
                 let max_scroll = (74.0 + count as f32 * step_y - (list_bottom - list_top)).max(0.0);
                 self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
                 self.list_view = Some([list_top, list_bottom, max_scroll]);
@@ -4917,6 +4918,11 @@ impl Launcher {
                         "Export Active Control Preset",
                         "Export current layout JSON to Horizon Reports & controls folder",
                         SettingControl::Button("Export JSON", Action::ExportControlProfile, false),
+                    ),
+                    (
+                        "Import ZalithLauncher2 Controls",
+                        "Convert a controller JSON into an editable GoyControl preset",
+                        SettingControl::Button("Import JSON", Action::ImportZalithProfile, false),
                     ),
                     (
                         "CAMERA LOOK & AIMING SENSITIVITY",
@@ -5833,6 +5839,21 @@ impl Launcher {
                     touch.control_style.storage_subdir(),
                     touch.control_style.label()
                 );
+            }
+            Some(Action::ImportZalithProfile) => {
+                if let Some(window) = &self.window {
+                    let size = window.inner_size();
+                    let [x, y] = winit::platform::android::native_input_scale();
+                    let screen = horizon_client::touch::zalith_import::Screen {
+                        width: size.width,
+                        height: size.height,
+                        density: (window.scale_factor() * x.min(y)) as f32,
+                    };
+                    let home = self.catalog.config.game_home(&self.home);
+                    if let Err(error) = crate::documents::begin_zalith(home, screen) {
+                        self.catalog.status = error;
+                    }
+                }
             }
             Some(Action::MouseSensDelta(delta)) => {
                 self.modify_game_settings(|s| {
