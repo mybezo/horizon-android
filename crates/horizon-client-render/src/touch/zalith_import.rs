@@ -259,7 +259,10 @@ pub fn convert(bytes: &[u8], screen: Screen) -> Result<Import, String> {
         preset.preset_name = "Zalith Default".into();
     }
     preset.preset_description = "Imported from ZalithLauncher2".into();
-    preset.custom_buttons.clear();
+    let native_mouse = preset
+        .custom_buttons
+        .drain(..)
+        .find(|button| button.key == "mouse.virtual.toggle");
 
     let mut joystick = false;
     let mut skipped = 0;
@@ -388,6 +391,38 @@ pub fn convert(bytes: &[u8], screen: Screen) -> Result<Import, String> {
     }
     preset.button_visibility[Control::Move as usize] = if joystick { 1 } else { 2 };
     preset.sanitize();
+    if buttons < MAX_BUTTONS
+        && let Some(mut mouse) = native_mouse
+    {
+        let aspect = screen.width.max(1) as f32 / screen.height.max(1) as f32;
+        let occupied: Vec<_> = preset
+            .custom_buttons
+            .iter()
+            .map(|button| button.layouts[preset.mode.index()].rect(aspect))
+            .chain(joystick.then(|| preset.placement(Control::Move).rect(aspect)))
+            .collect();
+        // Keep the native cursor toggle clear of imported controls and the top toolbar.
+        let centers = [0.18, 0.30, 0.42, 0.54, 0.66, 0.78].into_iter().flat_map(|y| {
+            [0.60, 0.36, 0.72, 0.24, 0.84, 0.12, 0.50]
+                .into_iter()
+                .map(move |x| [x, y])
+        });
+        let mut p = mouse.layouts[0];
+        for center in centers {
+            p.center = center;
+            let [x, y, w, h] = p.rect(aspect);
+            if x >= 0.0
+                && x + w <= 1.0
+                && !occupied.iter().any(|&[ox, oy, ow, oh]| {
+                    x <= ox + ow && x + w >= ox && y <= oy + oh && y + h >= oy
+                })
+            {
+                mouse.layouts = [p; 3];
+                preset.custom_buttons.push(mouse);
+                break;
+            }
+        }
+    }
     Ok(Import {
         preset,
         buttons,
@@ -481,5 +516,35 @@ mod tests {
         assert!(!imported.joystick);
         assert!(!imported.preset.visible(Control::Move));
         assert_eq!(imported.preset.custom_buttons[0].key, "key.keyboard.w");
+        let mut controls = crate::touch::TouchControls::default();
+        controls.settings = imported.preset;
+        controls.open_editor();
+        let editor = controls.editor.unwrap();
+        assert_eq!(editor.selected, None);
+        assert!(!editor.show_hidden);
+    }
+
+    #[test]
+    fn imported_layout_can_toggle_the_native_virtual_mouse() {
+        let bytes = br#"{
+            "editorVersion":12,
+            "info":{"name":{"default":"Layout"}},
+            "layers":[{"normalButtons":[{
+                "position":{"x":6000,"y":1200},
+                "buttonSize":{"type":"dp","widthDp":240,"heightDp":80},
+                "clickEvents":[{"type":"key","key":"GLFW_KEY_W"}]
+            }]}]
+        }"#;
+        let imported = convert(bytes, SCREEN).unwrap();
+        let mut controls = crate::touch::TouchControls::default();
+        controls.viewport(SCREEN.width, SCREEN.height);
+        controls.settings = imported.preset;
+        let mouse = controls.custom_placement(1);
+        assert!(mouse.visible_in_game && mouse.visible_in_menu);
+        assert_ne!(mouse.center, [0.60, 0.18]);
+        controls.update(1, mouse.center, true, false);
+        assert_eq!(controls.key_events(), [("mouse.virtual.toggle".into(), true)]);
+        controls.update(1, mouse.center, false, true);
+        assert_eq!(controls.key_events(), [("mouse.virtual.toggle".into(), false)]);
     }
 }

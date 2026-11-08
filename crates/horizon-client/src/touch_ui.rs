@@ -4228,6 +4228,10 @@ fn draw_m3_swatch_chip(
     }
 }
 
+fn joystick_visibility_rect(x: f32, y: f32, width: f32) -> [f32; 4] {
+    [x + width - 126.0, y - 4.0, 114.0, 24.0]
+}
+
 pub fn draw_hud_editor(
     tc: &crate::touch::TouchControls,
     b: &mut HudBatch,
@@ -4273,7 +4277,10 @@ pub fn draw_hud_editor(
     ui.fill(0.0, h * 0.5, w, 1.0, rgba(154, 123, 255, 38));
 
     // JoystickMoveArea visual zone indicator when Move is selected
-    if ed.selected == Some(Control::Move) && ed.selected_custom.is_none() {
+    if ed.selected == Some(Control::Move)
+        && ed.selected_custom.is_none()
+        && (tc.visible(Control::Move) || ed.show_hidden)
+    {
         let zone = match tc.settings.joystick_style.move_area {
             JoystickMoveArea::MidBottomLeft => Some([0.0, h * 0.35, w * 0.45, h * 0.65]),
             JoystickMoveArea::RightSideAnywhere => Some([w * 0.50, 0.0, w * 0.50, h]),
@@ -5195,13 +5202,25 @@ pub fn draw_hud_editor(
                 }
                 _ => {
                     // Joystick Tab 2: Active Zone, Footprint Size & Visibility Rules
-                    ui.text(
+                    ui.text_clipped(
                         Face::SemiBold,
                         9.6,
                         wx + 12.0,
                         body_y + 3.0,
+                        ww - 150.0,
                         st_text,
                         "ACTIVE TOUCH ZONE & VISIBILITY RULES",
+                    );
+                    let r = joystick_visibility_rect(wx, body_y, ww);
+                    let visible = tc.visible(Control::Move);
+                    ui.rounded(r[0], r[1], r[2], r[3], 10.0, st_card);
+                    ui.border(r[0], r[1], r[2], r[3], 10.0, st_border);
+                    ui.centered_fit(
+                        Face::SemiBold,
+                        9.6,
+                        r,
+                        if visible { danger_c } else { st_cyan },
+                        if visible { "Hide Joystick" } else { "Show Joystick" },
                     );
                     let area_y = body_y + 26.0;
                     let hw = (ww - 24.0 - 8.0) * 0.5;
@@ -7164,6 +7183,20 @@ pub fn touch_hud_editor(
                         }
                     }
                     _ => {
+                        if inside(joystick_visibility_rect(wx, body_y, ww)) {
+                            push_undo_snapshot(&mut ed, &tc.settings);
+                            let show = !tc.visible(Control::Move);
+                            tc.settings.button_visibility[Control::Move as usize] =
+                                if show { 1 } else { 2 };
+                            if !show {
+                                ed.selected = None;
+                                ed.props_open = false;
+                                ed.status_msg = Some("Joystick hidden.".into());
+                            }
+                            let _ = tc.settings.save();
+                            tc.clicked = true;
+                            return false;
+                        }
                         let area_y = body_y + 26.0;
                         let hw = (ww - 24.0 - 8.0) * 0.5;
                         if inside([wx + 12.0, area_y, hw, 38.0]) {
@@ -7781,7 +7814,9 @@ pub fn touch_hud_editor(
                 .get(idx)
                 .map(|_| tc.custom_placement(idx))
         } else {
-            ed.selected.map(|c| tc.placement(c))
+            ed.selected
+                .filter(|&c| tc.visible(c) || ed.show_hidden)
+                .map(|c| tc.placement(c))
         };
         if let Some(sel_p) = cur_sel_placement {
             let [nx, ny, nw, nh] = sel_p.rect(aspect);

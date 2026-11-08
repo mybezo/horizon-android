@@ -906,7 +906,11 @@ impl TouchControls {
                 .any(|(r, _)| matches!(r, Role::Move(_)));
             let joy_zone_supported = self.settings.control_style == ControlStyle::GoyControl
                 || self.settings.mode != Mode::Dpad;
-            if control.is_none() && !has_move && joy_zone_supported && self.visible(Control::Move) {
+            if control.is_none()
+                && !has_move
+                && joy_zone_supported
+                && self.visible_for_state(Control::Move, self.in_menu)
+            {
                 let zone_x = if self.settings.left_handed {
                     1.0 - point[0]
                 } else {
@@ -2078,6 +2082,20 @@ mod tests {
         t.settings.dynamic_area_x = 0.0;
         t.update(5, [0.0, 0.5], true, false);
         assert!(matches!(t.fingers[&5].0, Role::Look { .. }));
+    }
+
+    #[test]
+    fn goy_joystick_hidden_in_game_does_not_capture_its_active_zone() {
+        let mut t = TouchControls::default();
+        t.settings = Settings::default_goycontrol();
+        t.settings.custom_buttons.clear();
+        t.settings.joystick_style.move_area = JoystickMoveArea::FollowFinger;
+        let slot = t.settings.slot(Control::Move);
+        t.settings.layouts[t.settings.mode.index()][slot].visible_in_game = false;
+
+        t.update(1, [0.12, 0.6], true, false);
+        assert!(matches!(t.fingers[&1].0, Role::Look { .. }));
+        assert!(t.move_anchor().is_none());
     }
 
     #[test]

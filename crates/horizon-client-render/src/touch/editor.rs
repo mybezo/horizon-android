@@ -107,8 +107,9 @@ impl TouchControls {
     pub fn open_editor(&mut self) {
         self.clear();
         let is_default = self.settings.is_default_preset();
+        let show_hidden = self.settings.control_style != ControlStyle::GoyControl;
         self.editor = Some(Editor {
-            selected: Some(Control::Move),
+            selected: (show_hidden || self.settings.visible(Control::Move)).then_some(Control::Move),
             option: None,
             apply_all: false,
             original: self.settings.clone(),
@@ -126,7 +127,7 @@ impl TouchControls {
             kb_scroll_x: 0.0,
             pod_expanded: true,
             pod_anim: 1.0,
-            show_hidden: true,
+            show_hidden,
             active_drag: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
