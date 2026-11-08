@@ -4,7 +4,6 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 pub const MAX_BYTES: usize = 4 * 1024 * 1024;
-const MAX_BUTTONS: usize = 32;
 
 #[derive(Clone, Copy)]
 pub struct Screen {
@@ -188,6 +187,7 @@ fn binding(event: &Event) -> Option<String> {
         "GLFW_MOUSE_BUTTON_5" => "key.mouse.5",
         "launcher.event.scroll_up" | "launcher.event.scroll_up.single" => "mouse.scroll.up",
         "launcher.event.scroll_down" | "launcher.event.scroll_down.single" => "mouse.scroll.down",
+        "launcher.event.switch_ime" => "keyboard.toggle",
         key => {
             let key = key.strip_prefix("GLFW_KEY_")?;
             let suffix = match key {
@@ -263,6 +263,7 @@ pub fn convert(bytes: &[u8], screen: Screen) -> Result<Import, String> {
         .custom_buttons
         .drain(..)
         .find(|button| button.key == "mouse.virtual.toggle");
+    let button_limit = preset.control_style.custom_button_limit();
 
     let mut joystick = false;
     let mut skipped = 0;
@@ -276,7 +277,7 @@ pub fn convert(bytes: &[u8], screen: Screen) -> Result<Import, String> {
         }
         for button in layer.normal_buttons {
             let (in_game, in_menu) = axes(layer.visibility_type, button.visibility_type);
-            if (!in_game && !in_menu) || preset.custom_buttons.len() == MAX_BUTTONS {
+            if (!in_game && !in_menu) || preset.custom_buttons.len() >= button_limit {
                 skipped += 1;
                 continue;
             }
@@ -391,7 +392,7 @@ pub fn convert(bytes: &[u8], screen: Screen) -> Result<Import, String> {
     }
     preset.button_visibility[Control::Move as usize] = if joystick { 1 } else { 2 };
     preset.sanitize();
-    if buttons < MAX_BUTTONS
+    if buttons < button_limit
         && let Some(mut mouse) = native_mouse
     {
         let aspect = screen.width.max(1) as f32 / screen.height.max(1) as f32;
@@ -522,6 +523,36 @@ mod tests {
         let editor = controls.editor.unwrap();
         assert_eq!(editor.selected, None);
         assert!(!editor.show_hidden);
+    }
+
+    #[test]
+    fn imports_open_keyboard_after_the_first_32_buttons() {
+        let mut layout: serde_json::Value = serde_json::from_str(
+            r#"{
+            "editorVersion":12,
+            "info":{"name":{"default":"Keyboard"}},
+            "layers":[{"normalButtons":[{
+                "text":{"default":"Keyboard"},
+                "position":{"x":8500,"y":1500},
+                "buttonSize":{"type":"dp","widthDp":60,"heightDp":35},
+                "clickEvents":[{"type":"launcher_event","key":"launcher.event.switch_ime"}]
+            }]}]
+        }"#,
+        )
+        .unwrap();
+        let buttons = layout["layers"][0]["normalButtons"].as_array_mut().unwrap();
+        let keyboard = buttons.pop().unwrap();
+        let mut key = keyboard.clone();
+        key["clickEvents"][0] = serde_json::json!({"type":"key","key":"GLFW_KEY_W"});
+        buttons.resize(32, key);
+        buttons.push(keyboard);
+
+        let imported = convert(&serde_json::to_vec(&layout).unwrap(), SCREEN).unwrap();
+        assert_eq!(imported.buttons, 33);
+        assert_eq!(imported.skipped, 0);
+        let button = &imported.preset.custom_buttons[32];
+        assert_eq!(button.active_tokens(), ["keyboard.toggle"]);
+        assert_eq!(button.label(), "Keyboard");
     }
 
     #[test]

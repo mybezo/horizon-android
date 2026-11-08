@@ -27,6 +27,7 @@ pub struct TouchUi {
     pub hub_scroll: f32,
     pub hub_max_scroll: Cell<f32>,
     pub hub_scroll_drag: Option<(u64, f32, f32, bool)>,
+    hub_opacity_drag: Option<(u64, f32)>,
     pub presets_modal_open: bool,
     pub preset_dialog: Option<PresetDialogState>,
     pub cached_presets: Vec<crate::touch::PresetMeta>,
@@ -82,6 +83,7 @@ impl Default for TouchUi {
             hub_scroll: 0.0,
             hub_max_scroll: Cell::new(0.0),
             hub_scroll_drag: None,
+            hub_opacity_drag: None,
             presets_modal_open: false,
             preset_dialog: None,
             cached_presets: Vec::new(),
@@ -157,6 +159,7 @@ pub enum InGameMenuAction {
     StepGyroSensitivity(i32),
     SetButtonScale(f32),
     StepButtonScale(i32),
+    SetControlHubOpacity(f32),
     TriggerKey(KeyCode),
     OpenKeyboard,
     /// Kill the game process now (no save, no shutdown sequence).
@@ -667,6 +670,7 @@ impl TouchUi {
         self.resolution_scale_dragging = false;
         self.custom_kb_drag = None;
         self.hub_scroll_drag = None;
+        self.hub_opacity_drag = None;
     }
     pub fn cancel_relative(&mut self) {
         self.relative = None;
@@ -1092,6 +1096,7 @@ const MOUSE_AND_ACTION_ITEMS: &[(&str, &str)] = &[
     ("Scroll Wheel Up", "mouse.scroll.up"),
     ("Scroll Wheel Down", "mouse.scroll.down"),
     ("Toggle Virtual Mouse", "mouse.virtual.toggle"),
+    ("Open Keyboard", "keyboard.toggle"),
     ("Mouse Look Area", "mouse.look"),
     ("Action: Attack / Mine", "action:key.attack"),
     ("Action: Use / Place", "action:key.use"),
@@ -1575,6 +1580,10 @@ fn hub_metrics(w: f32, h: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32) 
     (dw, dh, dx, dy, side_w, cx, cw, body_top, body_h)
 }
 
+fn hub_opacity_rect(x: f32, body_y: f32, width: f32) -> [f32; 4] {
+    [x, body_y + 234.0, width, 48.0]
+}
+
 impl TouchUi {
     fn step_animations(&self) -> (f32, f32) {
         let open_target = if self.floating_menu { 1.0 } else { 0.0 };
@@ -1621,11 +1630,12 @@ impl TouchUi {
         p_gui: [f32; 2],
         settings: &mut crate::touch::Settings,
     ) -> Option<InGameMenuAction> {
-        use crate::touch::ControlStyle;
+        use crate::touch::{ControlStyle, Settings};
         self.goy_mode = settings.control_style == ControlStyle::GoyControl;
         if !settings.show_control_hub {
             self.floating_menu = false;
             self.floating_drag = None;
+            self.hub_opacity_drag = None;
             return None;
         }
         self.pointer_off = !settings.virtual_mouse_enabled;
@@ -1711,7 +1721,7 @@ impl TouchUi {
             }
         }
 
-        if phase == TouchPhase::Started && inside(btn_rect) {
+        if phase == TouchPhase::Started && inside(btn_rect) && self.hub_opacity_drag.is_none() {
             self.floating_drag = Some((id, [p[0] - btn_x, p[1] - btn_y], false));
             return Some(InGameMenuAction::Close);
         }
@@ -1722,6 +1732,25 @@ impl TouchUi {
 
         let (dw, dh, dx, dy, side_w, cx, cw, body_top, body_h) = hub_metrics(w, h);
         let content_pane = [cx - 4.0, body_top, cw + 8.0, body_h];
+        let opacity_at = |x: f32| {
+            let t = ((x - cx - 10.0) / (cw - 20.0).max(16.0)).clamp(0.0, 1.0);
+            let min = Settings::MIN_CONTROL_HUB_OPACITY;
+            ((min + t * (1.0 - min)) * 100.0).round() / 100.0
+        };
+        if let Some((owner, _)) = self.hub_opacity_drag {
+            if owner == id {
+                match phase {
+                    TouchPhase::Moved => self.hub_opacity_drag = Some((id, opacity_at(p[0]))),
+                    TouchPhase::Ended => {
+                        self.hub_opacity_drag = None;
+                        return Some(InGameMenuAction::SetControlHubOpacity(opacity_at(p[0])));
+                    }
+                    TouchPhase::Cancelled => self.hub_opacity_drag = None,
+                    TouchPhase::Started => {}
+                }
+            }
+            return Some(InGameMenuAction::Close);
+        }
 
         // Handle ongoing real-time 3D resolution scale slider drag on Tab 0 (Recommended)
         if self.resolution_scale_dragging {
@@ -2242,6 +2271,11 @@ impl TouchUi {
             // Check if touch started on the Global Button Scale slider track in Tab 3 (Buttons)
             if self.hub_tab == 3 && inside(content_pane) {
                 let body_y = body_top - self.hub_scroll;
+                let tab_slide = (1.0 - self.tab_anim.get()).powi(3) * 14.0;
+                if self.goy_mode && inside(hub_opacity_rect(cx, body_y + tab_slide, cw)) {
+                    self.hub_opacity_drag = Some((id, opacity_at(p[0])));
+                    return Some(InGameMenuAction::Close);
+                }
                 let scale_card_y = body_y + 18.0;
                 if inside([cx, scale_card_y, cw, 50.0]) {
                     self.button_scale_dragging = true;
@@ -2498,7 +2532,7 @@ impl TouchUi {
         Some(InGameMenuAction::Close)
     }
 
-    /// Draws the Floating Menu Button (MCPE stone-slate `H` button vs GoyControl `=` bubble) and
+    /// Draws the Floating Menu Button (MCPE `H` button or GoyControl gear) and
     /// the redesigned Horizon Control Hub with smooth motion, generous spacing, scrollable content pane,
     /// and authoritative Virtual Mouse & gameplay settings.
     pub fn draw_floating_menu(
@@ -2507,7 +2541,7 @@ impl TouchUi {
         a: &HudAtlas,
         settings: &crate::touch::Settings,
     ) {
-        use crate::touch::ControlStyle;
+        use crate::touch::{ControlStyle, Settings};
         use crate::ui_theme::{Face, Icon, Ui, color};
         if !settings.show_control_hub {
             return;
@@ -2534,6 +2568,9 @@ impl TouchUi {
         let text_c = theme.text_primary;
         let muted_c = theme.text_muted;
         let danger_c = theme.danger;
+        let gear_opacity = self
+            .hub_opacity_drag
+            .map_or(settings.control_hub_opacity, |(_, opacity)| opacity);
 
         let bubble_alpha = if self.floating_menu {
             1.0
@@ -2575,47 +2612,13 @@ impl TouchUi {
                     color::with_alpha(text_c, bubble_alpha),
                 );
             } else {
-                ui.rounded(
-                    bx + 1.5,
-                    by + 3.0,
-                    bw,
-                    bh,
-                    14.0,
-                    color::with_alpha(rgba(0, 0, 0, 135), bubble_alpha),
-                );
-                ui.rounded(
-                    bx,
-                    by,
-                    bw,
-                    bh,
-                    14.0,
-                    color::with_alpha(
-                        if self.floating_menu { accent } else { card_bg },
-                        bubble_alpha,
-                    ),
-                );
-                ui.stroke_rounded(
-                    bx,
-                    by,
-                    bw,
-                    bh,
-                    14.0,
-                    1.6,
-                    color::with_alpha(accent, bubble_alpha),
-                );
+                let size = 28.0;
                 ui.icon(
-                    Icon::MenuEquals,
-                    bx + (bw - 22.0) * 0.5,
-                    by + (bh - 22.0) * 0.5,
-                    22.0,
-                    color::with_alpha(
-                        if self.floating_menu {
-                            accent_fg
-                        } else {
-                            accent_hi
-                        },
-                        bubble_alpha,
-                    ),
+                    Icon::Gear,
+                    bx + (bw - size) * 0.5,
+                    by + (bh - size) * 0.5,
+                    size,
+                    color::with_alpha(rgba(255, 255, 255, 255), bubble_alpha * gear_opacity),
                 );
             }
         }
@@ -2730,6 +2733,7 @@ impl TouchUi {
             0 => 394.0,
             1 => 368.0,
             2 => 410.0,
+            3 if settings.control_style == ControlStyle::GoyControl => 294.0,
             3 => 242.0,
             _ => 340.0,
         };
@@ -3509,6 +3513,20 @@ impl TouchUi {
                     Some(settings.inventory_controls),
                     None,
                 );
+                if settings.control_style == ControlStyle::GoyControl {
+                    let min = Settings::MIN_CONTROL_HUB_OPACITY;
+                    draw_m3_stepper_cell(
+                        &mut ui,
+                        hub_opacity_rect(cx, body_y, cw),
+                        &format!("Gear Opacity|{:.0}%", gear_opacity * 100.0),
+                        (gear_opacity - min) / (1.0 - min),
+                        accent,
+                        card_sel,
+                        card_bg,
+                        border_c,
+                        text_c,
+                    );
+                }
             }
             _ => {
                 // Tab 3: Advanced & Quick Actions
@@ -7515,8 +7533,16 @@ pub fn touch_hud_editor(
                             let ex = wx + 12.0 + slot as f32 * (ew + 4.0);
                             if inside([ex, body_y, ew, 42.0]) {
                                 if ed.selected_custom.is_none() {
-                                    push_undo_snapshot(&mut ed, &tc.settings);
                                     let idx = tc.settings.custom_buttons.len();
+                                    let limit = tc.settings.control_style.custom_button_limit();
+                                    if idx >= limit {
+                                        ed.status_msg =
+                                            Some(format!("Button limit reached ({limit})."));
+                                        ed.props_open = false;
+                                        tc.clicked = true;
+                                        return false;
+                                    }
+                                    push_undo_snapshot(&mut ed, &tc.settings);
                                     let is_goy =
                                         tc.settings.control_style == ControlStyle::GoyControl;
                                     let mut nb = CustomButton::new("key.mouse.left".into(), idx);
@@ -7765,7 +7791,8 @@ pub fn touch_hud_editor(
                         }
                         3 => {
                             // + Add Button (supported in BOTH MCPE and GoyControl modes!)
-                            if tc.settings.custom_buttons.len() < 32 {
+                            let limit = tc.settings.control_style.custom_button_limit();
+                            if tc.settings.custom_buttons.len() < limit {
                                 push_undo_snapshot(&mut ed, &tc.settings);
                                 let idx = tc.settings.custom_buttons.len();
                                 let is_goy = tc.settings.control_style == ControlStyle::GoyControl;
@@ -7783,6 +7810,8 @@ pub fn touch_hud_editor(
                                     ed.picker_step = PickerStep::AskInputType { event_slot: 0 };
                                 }
                                 let _ = tc.settings.save();
+                            } else {
+                                ed.status_msg = Some(format!("Button limit reached ({limit})."));
                             }
                         }
                         _ => {

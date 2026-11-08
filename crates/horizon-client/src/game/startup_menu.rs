@@ -1046,6 +1046,16 @@ impl Loading {
         pressed: bool,
     ) {
         let b = HudBatch::new(self.menu_size());
+        if token == "keyboard.toggle" {
+            if pressed {
+                if crate::platform::active() {
+                    crate::platform::hide();
+                } else {
+                    crate::platform::show("");
+                }
+            }
+            return;
+        }
         if token == "mouse.virtual.toggle" {
             if pressed {
                 for right in self.menu.touch.release_all_mouse() {
@@ -1840,6 +1850,11 @@ impl Loading {
                         self.menu.controls.settings.button_scale =
                             (self.menu.controls.settings.button_scale + dir as f32 * 0.10)
                                 .clamp(0.50, 2.00);
+                        let _ = self.menu.controls.settings.save();
+                        self.settings.touch = self.menu.controls.settings.clone();
+                    }
+                    InGameMenuAction::SetControlHubOpacity(opacity) => {
+                        self.menu.controls.settings.control_hub_opacity = opacity;
                         let _ = self.menu.controls.settings.save();
                         self.settings.touch = self.menu.controls.settings.clone();
                     }

@@ -96,6 +96,13 @@ pub enum ControlStyle {
     GoyControl,
 }
 impl ControlStyle {
+    pub fn custom_button_limit(self) -> usize {
+        match self {
+            Self::Mcpe => 32,
+            Self::GoyControl => 64,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Mcpe => "MCPE (Default)",
@@ -489,6 +496,8 @@ pub struct Settings {
     pub ui_vibrate: bool,
     #[serde(default = "default_feedback_enabled")]
     pub show_control_hub: bool,
+    #[serde(default = "default_control_hub_opacity")]
+    pub control_hub_opacity: f32,
     #[serde(deserialize_with = "deserialize_visibility")]
     pub button_visibility: [u8; 14],
     pub horizontal_margin: f32,
@@ -532,6 +541,9 @@ fn default_goy_preset_desc() -> String {
 }
 fn default_feedback_enabled() -> bool {
     true
+}
+fn default_control_hub_opacity() -> f32 {
+    1.0
 }
 fn default_floating_pos() -> [f32; 2] {
     [0.44, 0.05]
@@ -635,6 +647,7 @@ impl Default for Settings {
             vibrate: true,
             ui_vibrate: false,
             show_control_hub: true,
+            control_hub_opacity: default_control_hub_opacity(),
             button_visibility: [0; 14],
             horizontal_margin: 0.0,
             vertical_margin: 0.0,
@@ -654,6 +667,8 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    pub const MIN_CONTROL_HUB_OPACITY: f32 = 0.10;
+
     /// Protected factory Default layout for MCPE Controls.
     pub fn default_mcpe() -> Self {
         Self::default()
@@ -859,7 +874,8 @@ impl Settings {
         } else {
             32.0
         };
-        self.custom_buttons.truncate(32);
+        self.custom_buttons
+            .truncate(self.control_style.custom_button_limit());
         for button in &mut self.custom_buttons {
             if button.key.is_empty() {
                 button.key = "key.keyboard.unknown".into();
@@ -918,6 +934,12 @@ impl Settings {
             self.preset_name = self.preset_id.clone();
         }
         self.joystick_style.sanitize();
+        self.control_hub_opacity = if self.control_hub_opacity.is_finite() {
+            self.control_hub_opacity
+                .clamp(Self::MIN_CONTROL_HUB_OPACITY, 1.0)
+        } else {
+            default_control_hub_opacity()
+        };
         if self.floating_menu_pos == [0.44, 0.05] {
             self.floating_menu_pos = default_floating_pos();
         }
@@ -1270,6 +1292,7 @@ impl Settings {
         loaded.vibrate = prev_vibrate;
         loaded.ui_vibrate = prev_ui_vibrate;
         loaded.show_control_hub = prev_hub;
+        loaded.control_hub_opacity = self.control_hub_opacity;
         loaded.auto_jump = prev_auto_jump;
         *self = loaded;
         let _ = self.save_to(&game_home.join("horizon-touch.json"));
@@ -1320,6 +1343,7 @@ impl Settings {
         loaded.vibrate = prev_vibrate;
         loaded.ui_vibrate = prev_ui_vibrate;
         loaded.show_control_hub = prev_hub;
+        loaded.control_hub_opacity = self.control_hub_opacity;
         loaded.auto_jump = prev_auto_jump;
         *self = loaded;
         let _ = self.save_to(&game_home.join("horizon-touch.json"));
@@ -1787,6 +1811,7 @@ impl Settings {
             let prev_vibrate = self.vibrate;
             let prev_ui_vibrate = self.ui_vibrate;
             let prev_hub = self.show_control_hub;
+            let prev_hub_opacity = self.control_hub_opacity;
             let prev_auto_jump = self.auto_jump;
             *self = Self::default_for_style(style);
             self.active_mcpe_preset = prev_mcpe;
@@ -1799,6 +1824,7 @@ impl Settings {
             self.vibrate = prev_vibrate;
             self.ui_vibrate = prev_ui_vibrate;
             self.show_control_hub = prev_hub;
+            self.control_hub_opacity = prev_hub_opacity;
             self.auto_jump = prev_auto_jump;
             match style {
                 ControlStyle::Mcpe => self.active_mcpe_preset = "default".into(),
@@ -1836,6 +1862,7 @@ impl Settings {
         loaded.vibrate = active.vibrate;
         loaded.ui_vibrate = active.ui_vibrate;
         loaded.show_control_hub = active.show_control_hub;
+        loaded.control_hub_opacity = active.control_hub_opacity;
         loaded.auto_jump = active.auto_jump;
         match loaded.control_style {
             ControlStyle::Mcpe => loaded.active_mcpe_preset = loaded.preset_id.clone(),
@@ -1925,7 +1952,12 @@ mod tests {
     fn legacy_feedback_and_hub_preferences_migrate_and_roundtrip() {
         let mut legacy = serde_json::to_value(Settings::default()).unwrap();
         let fields = legacy.as_object_mut().unwrap();
-        for name in ["ui_vibrate", "show_control_hub", "classic_control_hub"] {
+        for name in [
+            "ui_vibrate",
+            "show_control_hub",
+            "classic_control_hub",
+            "control_hub_opacity",
+        ] {
             fields.remove(name);
         }
         fields.insert("floating_menu_pos".into(), serde_json::json!([0.44, 0.05]));
@@ -1935,14 +1967,17 @@ mod tests {
         assert!(!settings.ui_vibrate);
         assert!(!settings.vibrate);
         assert!(settings.show_control_hub);
+        assert_eq!(settings.control_hub_opacity, 1.0);
         assert_eq!(settings.floating_menu_pos, [0.44, 0.05]);
         settings.ui_vibrate = true;
         settings.show_control_hub = false;
+        settings.control_hub_opacity = 0.45;
         let restored: Settings =
             serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
         assert!(restored.ui_vibrate);
         assert!(!restored.vibrate);
         assert!(!restored.show_control_hub);
+        assert_eq!(restored.control_hub_opacity, 0.45);
     }
 
     #[test]
@@ -2215,6 +2250,7 @@ mod tests {
         settings.virtual_mouse_enabled = false;
         settings.virtual_mouse_sensitivity = 1.75;
         settings.virtual_mouse_pointer_scale = 1.6;
+        settings.control_hub_opacity = 0.45;
         settings.vibrate = false;
         settings.auto_jump = true;
         settings.toggle_sprint = true;
@@ -2225,6 +2261,7 @@ mod tests {
         assert!(!settings.virtual_mouse_enabled);
         assert_eq!(settings.virtual_mouse_sensitivity, 1.75);
         assert_eq!(settings.virtual_mouse_pointer_scale, 1.6);
+        assert_eq!(settings.control_hub_opacity, 0.45);
         assert!(!settings.vibrate);
         assert!(settings.auto_jump);
 
@@ -2232,6 +2269,7 @@ mod tests {
         assert!(!settings.virtual_mouse_enabled);
         assert_eq!(settings.virtual_mouse_sensitivity, 1.75);
         assert_eq!(settings.virtual_mouse_pointer_scale, 1.6);
+        assert_eq!(settings.control_hub_opacity, 0.45);
         assert!(!settings.vibrate);
         assert!(settings.auto_jump);
 

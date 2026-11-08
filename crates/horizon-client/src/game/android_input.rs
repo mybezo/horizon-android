@@ -306,6 +306,16 @@ impl Game<'_> {
             }
             return;
         }
+        if name == "keyboard.toggle" {
+            if down {
+                if crate::platform::active() {
+                    crate::platform::hide();
+                } else {
+                    self.android_show_keyboard();
+                }
+            }
+            return;
+        }
         if name == "mouse.look" {
             return;
         }
@@ -936,6 +946,11 @@ impl Game<'_> {
                 }
                 InGameMenuAction::SetButtonScale(val) => {
                     self.pad.touch.settings.button_scale = val.clamp(0.50, 2.00);
+                    let _ = self.pad.touch.settings.save();
+                    self.settings.touch = self.pad.touch.settings.clone();
+                }
+                InGameMenuAction::SetControlHubOpacity(opacity) => {
+                    self.pad.touch.settings.control_hub_opacity = opacity;
                     let _ = self.pad.touch.settings.save();
                     self.settings.touch = self.pad.touch.settings.clone();
                 }

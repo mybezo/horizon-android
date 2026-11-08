@@ -36,7 +36,11 @@ impl CustomButton {
             || crate::keybinds::mouse_button(token).is_some()
             || matches!(
                 token,
-                "mouse.scroll.up" | "mouse.scroll.down" | "mouse.virtual.toggle" | "mouse.look"
+                "mouse.scroll.up"
+                    | "mouse.scroll.down"
+                    | "mouse.virtual.toggle"
+                    | "mouse.look"
+                    | "keyboard.toggle"
             )
             || token
                 .strip_prefix("action:")
@@ -135,6 +139,7 @@ pub fn friendly_token_name(token: &str) -> String {
         "mouse.scroll.down" => "Wheel Down".into(),
         "mouse.virtual.toggle" => "Virtual Mouse".into(),
         "mouse.look" => "Mouse Look".into(),
+        "keyboard.toggle" => "Open Keyboard".into(),
         _ => {
             if let Some(name) = token.strip_prefix("action:") {
                 let tr = crate::text::Text::translate(name, &[]).plain();
@@ -328,7 +333,9 @@ impl TouchControls {
         if tokens.is_empty() {
             return false;
         }
-        let toggleable = placement.toggleable && tokens[0] != "mouse.virtual.toggle";
+        let toggleable = placement.toggleable
+            && !tokens.iter().any(|token| token == "keyboard.toggle")
+            && tokens[0] != "mouse.virtual.toggle";
         // Apply modifiers before their companion click or key.
         tokens.sort_by_key(|token| {
             !matches!(
