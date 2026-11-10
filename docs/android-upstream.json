@@ -42,5 +42,13 @@
     "fetched_main": "2266c4de14561146044c422e6c525b3ce52b0f79",
     "moving_main_merged": false,
     "notes": "Reviewed the current upstream loading handoff: it still leaks its resource owner for the process lifetime and has no Android lifecycle or GLES preparation path to transplant. Retained the Android baseline; this change owns resources per session, publishes background pause without redraws, and keeps native events flowing during exclusive GLES world preparation. No upstream deployment workflows were enabled."
+  },
+  "android_fork_sync": {
+    "date": "2026-11-10",
+    "repository": "https://github.com/starling-client/starling",
+    "stable_release": "v0.7.8",
+    "android_branch_commit": "fa548eb7a",
+    "starling_preview_commit": "5fe003048",
+    "notes": "The upstream android branch adds the project migration notice after v0.7.8. The Starling preview uses the upstream starling branch as a separate build for evaluation."
   }
 }
