@@ -222,11 +222,18 @@ impl Game<'_> {
             // In front of a mob that shares the boat.
             Some(self.player_boat_seat(i))
         } else {
-            // A minecart: the server moves it, the rider sits in it.
-            let cart = self.carts.iter().find(|c| c.id == id).map(|c| {
-                c.position
-                    .add_vector(Vec3::new(0.0, super::minecarts::SEAT, 0.0))
-            });
+            // A minecart: the server moves it, the rider sits in it. Anything
+            // else is a server plugin's seat (an armor stand, a display, an
+            // interaction or an arrow under a sitting or lying player).
+            let cart = self
+                .carts
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| {
+                    c.position
+                        .add_vector(Vec3::new(0.0, super::minecarts::SEAT, 0.0))
+                })
+                .or_else(|| self.object_seat(id));
             if cart.is_none() {
                 // Entity.baseTick: a passenger whose vehicle is gone stops
                 // riding it. Nothing with the id is in the level any more (it
@@ -245,6 +252,39 @@ impl Game<'_> {
             p.fall_distance = 0.0;
         }
         true
+    }
+
+    /// `Entity.positionRider` for the local player on a vehicle that is not a
+    /// mob, boat or minecart: the vehicle's passenger attachment (the top of
+    /// its box, `EntityAttachments`' default) less `Avatar`'s vehicle
+    /// attachment of 0.6. Sit and lay plugins seat the player on such an
+    /// entity; without a seat the client dropped the ride and its own
+    /// gravity pulled the player down through the seat.
+    fn object_seat(&self, id: u32) -> Option<Vec3> {
+        let key = id as i32;
+        let feet = if let Some(a) = self.armor_stands.iter().find(|a| a.id == id) {
+            // ArmorStand's box: 0 by 0 for a marker, half size when small.
+            let height = if a.marker {
+                0.0
+            } else if a.small {
+                0.9875
+            } else {
+                1.975
+            };
+            a.position.add_vector(Vec3::new(0.0, height, 0.0))
+        } else if let Some(d) = self.text_displays.get(&key) {
+            // Display's box is 0 by 0.
+            let at = d.seat().0;
+            Vec3::new(at.x, at.y, at.z)
+        } else if let Some(i) = self.interactions.get(&key) {
+            i.position
+                .add_vector(Vec3::new(0.0, f64::from(i.height), 0.0))
+        } else {
+            let t = self.remote.as_ref()?.entities.get(&key)?;
+            let height = tracked_seat_height(&t.kind);
+            Vec3::new(t.position[0], t.position[1] + height, t.position[2])
+        };
+        Some(feet.add_vector(Vec3::new(0.0, -PLAYER_VEHICLE_ATTACHMENT, 0.0)))
     }
 
     /// `LocalPlayer.tick` for a passenger: the boat it controls goes to the
@@ -439,6 +479,22 @@ fn mount_move(m: &Mob) -> S {
         pitch: m.head_pitch,
         on_ground: m.on_ground,
     })
+}
+
+/// `Avatar.DEFAULT_VEHICLE_ATTACHMENT`: a seated player's feet hang this far
+/// below its vehicle's passenger attachment.
+const PLAYER_VEHICLE_ATTACHMENT: f64 = 0.6;
+
+/// The box height (`EntityType.sized`) of an entity the client tracks only
+/// by type and position, for its passenger attachment: the entities plugins
+/// use as seats. Unknown types seat their passenger at their feet.
+fn tracked_seat_height(kind: &str) -> f64 {
+    match kind {
+        "minecraft:arrow" | "minecraft:spectral_arrow" | "minecraft:trident" => 0.5,
+        "minecraft:area_effect_cloud" => 0.5,
+        "minecraft:item" => 0.25,
+        _ => 0.0,
+    }
 }
 
 #[cfg(test)]

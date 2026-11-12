@@ -209,9 +209,9 @@ impl ChunkGenerator for NoTerrain {
 }
 
 /// A server entity the client tracks (position as last sent).
-struct Tracked {
-    kind: String,
-    position: [f64; 3],
+pub(super) struct Tracked {
+    pub(super) kind: String,
+    pub(super) position: [f64; 3],
 }
 /// Smooth an entity toward a new position over three ticks (InterpolationHandler).
 #[derive(Clone, Copy)]
@@ -486,7 +486,7 @@ pub(super) struct Remote {
     pub(super) menu_title: Option<horizon_client::text::Text>,
     state_id: i32,
     use_target: Option<[i32; 3]>,
-    entities: HashMap<i32, Tracked>,
+    pub(super) entities: HashMap<i32, Tracked>,
     lerps: HashMap<i32, Lerp>,
     /// The minecarts the server moves with `ClientboundMoveMinecartPacket`
     /// (`NewMinecartBehavior`), which have no interpolation handler.
