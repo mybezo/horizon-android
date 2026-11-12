@@ -3000,7 +3000,16 @@ impl Game<'_> {
                 }
                 self.capture(true);
             }
-            C::PlayerPosition(p) => self.remote_teleport(&p)?,
+            C::PlayerPosition(p) => {
+                if self.spectator() && self.screen != Screen::Playing {
+                    log::info!(
+                        "Horizon: spectator-screen teleport {:?} relatives {:#x}",
+                        p.position,
+                        p.relatives
+                    );
+                }
+                self.remote_teleport(&p)?
+            }
             C::PlayerRotation(p) => {
                 self.yaw = if p.relative_yaw {
                     self.yaw + p.yaw
@@ -5817,9 +5826,42 @@ impl Game<'_> {
         // LocalPlayer.sendChanges sends `input.keyPresses`, which an auto-jump's `makeJump` set to
         // jump for this tick: the server's prediction plays the jump from it. Sent as held, the jump
         // was the client's alone, and the server saw a jump its keys didn't allow.
+        self.log_spectator_screen_motion(keys);
         let auto_jumped = self.player.as_ref().is_some_and(|p| p.was_auto_jump);
         self.remote_send_state(input | u8::from(auto_jumped) << 4);
         Ok(())
+    }
+
+    /// Diagnostic for a player who sinks while a vanish plugin holds them in
+    /// spectator with a container open (SuperVanish's silent chest): the
+    /// first ticks of each such screen go to the log, which the Android
+    /// diagnostic report exports.
+    fn log_spectator_screen_motion(&self, keys: Keys) {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static LOGGED: AtomicU32 = AtomicU32::new(0);
+        let Some(p) = self.player.as_ref() else {
+            return;
+        };
+        if !(self.spectator() && self.screen != Screen::Playing) {
+            LOGGED.store(0, Ordering::Relaxed);
+            return;
+        }
+        if LOGGED.fetch_add(1, Ordering::Relaxed) >= 60 {
+            return;
+        }
+        log::info!(
+            "Horizon: spectator-screen tick y={:.4} vy={:.4} flying={} spectator={} \
+             shift={} keys_shift={} jump={} ground={} riding={:?}",
+            p.position.y,
+            p.velocity.y,
+            p.flying,
+            p.spectator,
+            p.shift_key_down,
+            keys.shift,
+            keys.jump,
+            p.ground.on_ground,
+            self.riding,
+        );
     }
 
     /// ClientPacketListener.handlePlayerAbilities: the player flies, may fly
